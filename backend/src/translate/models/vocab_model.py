@@ -4,14 +4,17 @@ from pydantic import BaseModel
 
 class VocabItem(BaseModel):
     word: str
-    contextual_meaning: str
+    contextual_meaning: Optional[str] = None
     context_sentence: str
-    simple_example: str
+    simple_example: Optional[str] = None
     concept_definition: Optional[str] = None
     synonyms: List[str] = []
     antonyms: List[str] = []
-    context_id: str
+    context_id: Optional[str] = None
     similarity_score: float = 0.0
+    is_translated: bool = False
+    source_lang: Optional[str] = None
+    is_phrase: bool = False
 
 
 class VocabAnalysisResponse(BaseModel):

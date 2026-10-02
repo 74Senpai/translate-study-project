@@ -80,7 +80,9 @@ async def test_embedding_and_vocab_service():
     res = await vocab_service.extract_and_save_vocab("She loves reading books.")
     assert len(res.vocabularies) > 0
     assert any(v.word == "book" or v.word == "love" or v.word == "read" for v in res.vocabularies)
-    assert res.vocabularies[0].context_id.startswith("ctx_")
+    # context_id is set for WordNet-resolved items, None for unresolved tokens
+    wn_items = [v for v in res.vocabularies if v.context_id is not None]
+    assert all(v.context_id.startswith("ctx_wn_") for v in wn_items)
 
 
 @pytest.mark.asyncio

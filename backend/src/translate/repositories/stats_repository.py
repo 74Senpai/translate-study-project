@@ -11,7 +11,7 @@ class StatsRepository:
         # Fallback in-memory store
         self._memory_store: Dict[str, dict] = {}
 
-    def update_word_occurrence(self, word: str, source_engine: str = "default") -> WordStatItem:
+    def update_word_occurrence(self, word: str, source_engine: str = "default", is_translated: bool = False) -> WordStatItem:
         word_key = word.lower().strip()
         now = datetime.now(timezone.utc)
         day_key = now.strftime("%Y-%m-%d")
@@ -23,6 +23,8 @@ class StatsRepository:
             self._memory_store[word_key] = {
                 "word": word_key,
                 "total_count": 0,
+                "encountered_count": 0,
+                "translated_count": 0,
                 "daily_counts": {},
                 "weekly_counts": {},
                 "monthly_counts": {},
@@ -32,10 +34,17 @@ class StatsRepository:
 
         entry = self._memory_store[word_key]
         entry["total_count"] += 1
+        if is_translated:
+            entry["translated_count"] = entry.get("translated_count", 0) + 1
+            src_key = f"{source_engine}_translated"
+        else:
+            entry["encountered_count"] = entry.get("encountered_count", 0) + 1
+            src_key = source_engine
+
         entry["daily_counts"][day_key] = entry["daily_counts"].get(day_key, 0) + 1
         entry["weekly_counts"][week_key] = entry["weekly_counts"].get(week_key, 0) + 1
         entry["monthly_counts"][month_key] = entry["monthly_counts"].get(month_key, 0) + 1
-        entry["source_counts"][source_engine] = entry["source_counts"].get(source_engine, 0) + 1
+        entry["source_counts"][src_key] = entry["source_counts"].get(src_key, 0) + 1
         entry["last_seen"] = last_seen
 
         return WordStatItem(
@@ -44,6 +53,8 @@ class StatsRepository:
             daily_count=entry["daily_counts"][day_key],
             weekly_count=entry["weekly_counts"][week_key],
             monthly_count=entry["monthly_counts"][month_key],
+            encountered_count=entry.get("encountered_count", 0),
+            translated_count=entry.get("translated_count", 0),
             source_counts=entry["source_counts"],
             last_seen=last_seen,
         )
@@ -64,6 +75,8 @@ class StatsRepository:
             daily_count=entry["daily_counts"].get(day_key, 0),
             weekly_count=entry["weekly_counts"].get(week_key, 0),
             monthly_count=entry["monthly_counts"].get(month_key, 0),
+            encountered_count=entry.get("encountered_count", 0),
+            translated_count=entry.get("translated_count", 0),
             source_counts=entry["source_counts"],
             last_seen=entry["last_seen"],
         )

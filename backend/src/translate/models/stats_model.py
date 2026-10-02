@@ -8,6 +8,8 @@ class WordStatItem(BaseModel):
     daily_count: int
     weekly_count: int
     monthly_count: int
+    encountered_count: int = 0
+    translated_count: int = 0
     source_counts: Dict[str, int] = {}
     last_seen: str
 

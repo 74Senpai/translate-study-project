@@ -14,13 +14,13 @@ Pipeline Architecture (Inflected Synonym Substitution + Trace-Back):
   4. Embedding & Cosine Similarity:
      - Compute vector embedding for original sentence and each variant sentence.
      - Measure cosine similarity between original sentence vector and variant sentence vector.
-  5. Top Variants & Synset Trace-Back:
-     - Rank variant sentences by similarity.
-     - Trace back variants to originating synsets & compute synset vote score.
-     - Rerank with domain context boost + POS match bonus.
-  6. Vietnamese Meaning & Sentence Verification:
-     - Translate best substituting synonyms / sense definition.
-     - If `translated_sentence` is provided, verify and promote Vietnamese terms present in it.
+   5. Top Variants & Synset Trace-Back:
+      - Rank variant sentences by similarity.
+      - Trace back variants to originating synsets & compute synset vote score.
+      - Rerank with POS match bonus.
+   6. Vietnamese Meaning & Sentence Verification:
+      - Translate best substituting synonyms / sense definition.
+      - If `translated_sentence` is provided, verify and promote Vietnamese terms present in it.
 """
 
 from typing import List, Optional, Dict, Tuple
@@ -43,125 +43,8 @@ from src.translate.services.embedding_service import EmbeddingService
 
 class VocabService:
     """
-    WSD Service using Inflected Synonym Substitution & Synset Trace-Back.
+    WSD Service using Inflected Synonym Substitution & Synset Trace-Back (WordNet data only).
     """
-
-    # ── Offline sense → Vietnamese map ────────────────────────────────────────
-    _SENSE_VI_MAP: Dict[str, List[str]] = {
-        # run
-        "run.v.01": ["chạy", "di chuyển nhanh"],
-        "run.v.02": ["vận hành", "điều hành"],
-        "run.v.03": ["chạy bộ"],
-        "run.v.04": ["quản lý", "điều hành"],
-        "run.v.05": ["vận hành", "hoạt động"],
-        "run.v.06": ["ứng cử", "tranh cử"],
-        "run.v.18": ["xảy ra thường xuyên", "phổ biến"],
-        "run.v.26": ["chạy", "di chuyển"],
-        "run.v.30": ["chạy", "di chuyển", "diễn ra"],
-        "race.v.01": ["đua", "thi đua"],
-        "race.v.02": ["đua tốc độ", "chạy thi"],
-        "campaign.v.01": ["quản lý", "điều hành", "ứng cử"],
-        "operate.v.01": ["vận hành", "điều hành", "quản lý"],
-        # fast
-        "fast.a.01": ["nhanh", "nhanh nhẹn"],
-        "fast.a.04": ["chặt", "vững chắc"],
-        "fast.r.01": ["nhanh", "nhanh chóng"],
-        "fast.r.02": ["chắc chắn", "vững chặt"],
-        # company
-        "company.n.01": ["công ty", "doanh nghiệp"],
-        "company.n.02": ["bầu bạn", "bạn đồng hành"],
-        "company.n.03": ["đoàn thể", "nhóm người"],
-        # education
-        "teach.v.01": ["dạy", "giảng dạy"],
-        "teach.v.02": ["giảng dạy", "hướng dẫn"],
-        "learn.v.01": ["học", "tiếp thu"],
-        "study.v.01": ["học", "nghiên cứu"],
-        "study.v.02": ["nghiên cứu", "tìm hiểu"],
-        "student.n.01": ["học sinh", "sinh viên"],
-        "pupil.n.01": ["học sinh"],
-        "school.n.01": ["trường học"],
-        "school.n.06": ["trường học", "cơ sở giáo dục"],
-        "educate.v.01": ["giáo dục", "đào tạo"],
-        "class.n.01": ["lớp học"],
-        "teacher.n.01": ["giáo viên", "thầy cô"],
-        # tech
-        "process.v.01": ["xử lý", "chế biến"],
-        "process.v.02": ["xử lý", "giải quyết"],
-        "process.v.03": ["xử lý", "tính toán"],
-        "process.n.01": ["quy trình", "tiến trình"],
-        "datum.n.01": ["dữ liệu", "thông tin"],
-        "data.n.01": ["dữ liệu"],
-        "algorithm.n.01": ["thuật toán"],
-        "software.n.01": ["phần mềm"],
-        "develop.v.01": ["phát triển", "xây dựng"],
-        "develop.v.02": ["phát triển", "tạo ra"],
-        "design.v.01": ["thiết kế"],
-        "design.n.01": ["thiết kế", "mô hình"],
-        "intelligence.n.01": ["trí tuệ", "thông minh"],
-        "intelligence.n.02": ["trí thông minh"],
-        "language.n.01": ["ngôn ngữ", "tiếng"],
-        "engineer.n.01": ["kỹ sư"],
-        # adverbs
-        "efficiently.r.01": ["hiệu quả", "có hiệu suất"],
-        "effectively.r.01": ["hiệu quả"],
-        "quickly.r.01": ["nhanh chóng"],
-        "slowly.r.01": ["chậm rãi"],
-        "well.r.01": ["tốt", "giỏi"],
-        # adjectives
-        "smart.a.01": ["thông minh"],
-        "smart.a.02": ["thông minh", "sắc sảo"],
-        "good.a.01": ["tốt", "giỏi"],
-        "large.a.01": ["lớn", "rộng"],
-        "small.a.01": ["nhỏ"],
-        "new.a.01": ["mới"],
-        "old.a.01": ["cũ", "già"],
-        "high.a.01": ["cao"],
-        "low.a.01": ["thấp"],
-        # family / social
-        "family.n.01": ["gia đình"],
-        "family.n.02": ["gia đình", "người thân"],
-        "family.n.04": ["dòng dõi gia đình", "gia tộc"],
-        "talent.n.01": ["tài năng"],
-        "talent.n.02": ["người có tài", "nhân tài"],
-        "musical.a.01": ["âm nhạc", "có tính nhạc"],
-        "musical.a.02": ["âm nhạc", "thuộc về âm nhạc"],
-    }
-
-    # ── Domain keyword sets for context boosting ───────────────────────────────
-    _DOMAIN_KEYWORDS: Dict[str, List[str]] = {
-        "business":  ["company", "firm", "business", "organization", "enterprise",
-                      "manage", "manager", "office", "ceo", "startup", "corporation"],
-        "motion":    ["fast", "slow", "quickly", "speed", "sprint", "walk", "race",
-                      "hurry", "rapidly", "rush"],
-        "tech":      ["algorithm", "data", "process", "software", "compute", "code",
-                      "program", "system", "network", "database"],
-        "education": ["student", "teacher", "school", "class", "learn", "study",
-                      "university", "lecture", "exam", "course"],
-    }
-    _DOMAIN_SENSE_AFFINITY: Dict[str, List[str]] = {
-        "business":  ["operate.v", "run.v.02", "run.v.04", "run.v.05", "campaign.v", "company.n.01", "company.n.02"],
-        "motion":    ["run.v.01", "run.v.03", "run.v.26", "run.v.30", "race.v", "scat.v", "fast.r.01", "fast.a.01"],
-        "tech":      ["process.v", "algorithm.n", "data.n", "datum.n", "develop.v"],
-        "education": ["teach.v", "learn.v", "study.v", "student.n", "school.n.01", "school.n.06"],
-    }
-
-    # ── Static fallback when WordNet has nothing ───────────────────────────────
-    _FALLBACK_DICT: Dict[str, List[str]] = {
-        "run": ["chạy", "quản lý", "vận hành"],
-        "company": ["công ty", "doanh nghiệp"],
-        "develop": ["phát triển"],
-        "algorithm": ["thuật toán"],
-        "engineer": ["kỹ sư"],
-        "design": ["thiết kế"],
-        "software": ["phần mềm"],
-        "study": ["nghiên cứu", "học tập"],
-        "intelligence": ["trí tuệ"],
-        "process": ["xử lý", "quy trình"],
-        "language": ["ngôn ngữ"],
-        "fast": ["nhanh"],
-        "smart": ["thông minh"],
-        "teacher": ["giáo viên"],
-    }
 
     def __init__(
         self,
@@ -201,6 +84,8 @@ class VocabService:
         sentence_text: str,
         top_k: int = 5,
         translated_sentence: Optional[str] = None,
+        is_translated: bool = False,
+        source_lang: Optional[str] = None,
     ) -> VocabAnalysisResponse:
         """
         Analyse content target words using Inflected Synonym Substitution & Trace-Back WSD.
@@ -221,15 +106,27 @@ class VocabService:
 
         for t_info in target_tokens:
             token_idx = t_info["idx"]
+            span_len  = t_info.get("span_len", 1)
             surface   = t_info["surface"]
             lemma     = t_info["lemma"]
+            display_word = t_info.get("display_word", surface)
             pos_tag   = t_info["pos"]
             tag       = t_info["tag"]
+            is_phrase = t_info.get("is_phrase", False)
             wn_pos    = pos_map.get(pos_tag, None)
 
-            synsets = self._get_synsets(lemma, pos_tag)
+            synsets = t_info.get("synsets") or self._get_synsets(lemma, pos_tag)
             if not synsets:
-                vocab_items.append(self._build_fallback_item(lemma, sentence_text, pos_tag))
+                vocab_items.append(
+                    self._build_fallback_item(
+                        word=display_word,
+                        sentence_text=sentence_text,
+                        pos_tag=pos_tag,
+                        is_translated=is_translated,
+                        source_lang=source_lang,
+                        is_phrase=is_phrase,
+                    )
+                )
                 continue
 
             # ── Stage 1 & 2: Candidates + Inflected Synonym Variants ─────────
@@ -241,7 +138,7 @@ class VocabService:
             for syn in synsets:
                 syn_name = syn.name()
                 raw_lemmas = [l.name().replace("_", " ") for l in syn.lemmas()]
-                syn_lemmas = [l for l in raw_lemmas if l.lower() != lemma.lower()]
+                syn_lemmas = [l for l in raw_lemmas if l.lower() != lemma.lower() and l.lower() != display_word.lower()]
                 antonyms   = [l.antonyms()[0].name().replace("_", " ")
                               for l in syn.lemmas() if l.antonyms()]
 
@@ -249,7 +146,7 @@ class VocabService:
                 if not syn_lemmas and syn.definition():
                     def_words = [
                         w.lower() for w in re.findall(r'\b[a-zA-Z]{3,}\b', syn.definition())
-                        if w.lower() not in stopwords and w.lower() != lemma.lower()
+                        if w.lower() not in stopwords and w.lower() != lemma.lower() and w.lower() != display_word.lower()
                     ]
                     syn_lemmas = def_words[:4]
 
@@ -267,9 +164,12 @@ class VocabService:
                     # Inflect synonym to match exact target token tag
                     inflected = self._inflect_word(s_lemma, tag)
                     
-                    # Substitute token at token_idx in sentence
-                    var_words = list(all_tokens_text)
-                    var_words[token_idx] = inflected
+                    # Substitute token / phrase span at token_idx in sentence
+                    var_words = (
+                        all_tokens_text[:token_idx]
+                        + [inflected]
+                        + all_tokens_text[token_idx + span_len:]
+                    )
                     var_sent = " ".join(var_words)
 
                     variants.append((var_sent, s_lemma, inflected, syn_name))
@@ -295,11 +195,14 @@ class VocabService:
             top_k_senses = sorted(synset_votes.items(), key=lambda x: x[1], reverse=True)[:top_k]
 
             # ── Stage 5: Composite Reranking ──────────────────────────────────
-            best_synset_name, best_score = self._rerank_senses(
-                sentence_words=sentence_words,
-                target_pos=wn_pos,
-                top_k_senses=top_k_senses,
-            )
+            if not top_k_senses:
+                best_synset_name = synsets[0].name()
+                best_score = 1.0
+            else:
+                best_synset_name, best_score = self._rerank_senses(
+                    target_pos=wn_pos,
+                    top_k_senses=top_k_senses,
+                )
 
             best_info = synset_info[best_synset_name]
 
@@ -311,7 +214,7 @@ class VocabService:
             best_subs = [s for s, _ in winning_synonyms[:3]]
 
             vi_meanings = await self._get_vi_meanings(
-                word=lemma,
+                word=display_word,
                 synset_name=best_synset_name,
                 best_substitutes=best_subs,
                 definition=best_info["definition"],
@@ -322,18 +225,21 @@ class VocabService:
             synonyms = best_info["synonyms"][:5]
             antonyms = best_info["antonyms"][:5]
             simple_ex = (best_info["examples"][0]
-                         if best_info.get("examples") else f"Example for {lemma}.")
+                         if best_info.get("examples") else None)
 
             item = VocabItem(
-                word=lemma,
-                contextual_meaning=", ".join(vi_meanings[:3]),
+                word=display_word,
+                contextual_meaning=", ".join(vi_meanings[:3]) if vi_meanings else None,
                 context_sentence=sentence_text,
                 simple_example=simple_ex,
-                concept_definition=best_info.get("definition", ""),
+                concept_definition=best_info.get("definition") or None,
                 synonyms=synonyms,
                 antonyms=antonyms,
                 context_id=best_info["context_id"],
                 similarity_score=round(best_score, 4),
+                is_translated=is_translated,
+                source_lang=source_lang,
+                is_phrase=is_phrase,
             )
             self.repo.save_vocab_item(item)
             vocab_items.append(item)
@@ -343,37 +249,157 @@ class VocabService:
     # ── Private Helpers ────────────────────────────────────────────────────────
 
     def _extract_target_tokens(self, sentence_text: str) -> List[dict]:
-        """Extract content target tokens with positional index and POS tag."""
+        """
+        Extract content target tokens and multi-word phrases using SpaCy POS tags and WordNet synset lookup.
+        Scans for 4-gram, 3-gram, 2-gram compounds/phrases in WordNet before falling back to unigrams.
+        """
+        targets = []
         if self.nlp is not None:
             doc = self.nlp(sentence_text)
             doc_tokens_text = [t.text for t in doc]
-            targets = []
+            n_tokens = len(doc)
+            used_indices = set()
+
+            # 1. Multi-word Phrase Scanning (n = 4 down to 2)
+            for n in range(4, 1, -1):
+                for i in range(n_tokens - n + 1):
+                    if any(idx in used_indices for idx in range(i, i + n)):
+                        continue
+
+                    span_tokens = doc[i:i+n]
+
+                    first_t = span_tokens[0]
+                    last_t = span_tokens[-1]
+
+                    if first_t.is_stop or first_t.is_punct or first_t.pos_ in ("PRON", "DET", "PUNCT", "CCONJ", "SCONJ"):
+                        continue
+                    if last_t.is_punct or last_t.pos_ in ("PUNCT", "DET", "CCONJ", "SCONJ"):
+                        continue
+                    if not all(t.is_alpha or t.text == "-" for t in span_tokens):
+                        continue
+
+                    candidate_lemmas = [t.lemma_.lower() for t in span_tokens if t.is_alpha]
+                    candidate_surfaces = [t.text.lower() for t in span_tokens if t.is_alpha]
+
+                    if len(candidate_lemmas) < 2:
+                        continue
+
+                    phrase_lemma_underscore = "_".join(candidate_lemmas)
+                    phrase_surface_underscore = "_".join(candidate_surfaces)
+
+                    span_pos_tag = ""
+                    for t in reversed(span_tokens):
+                        if t.pos_ in ("NOUN", "VERB", "ADJ", "ADV"):
+                            span_pos_tag = t.pos_
+                            break
+
+                    synsets = self._get_synsets(
+                        [phrase_lemma_underscore, phrase_surface_underscore],
+                        pos_tag=span_pos_tag
+                    )
+
+                    if synsets:
+                        phrase_display_parts = []
+                        for idx_t, t in enumerate(span_tokens):
+                            if idx_t == 0 or t.text == "-" or span_tokens[idx_t-1].text == "-":
+                                phrase_display_parts.append(t.text)
+                            else:
+                                phrase_display_parts.append(" " + t.text)
+                        phrase_display = "".join(phrase_display_parts)
+
+                        pos_tag = span_pos_tag or "NOUN"
+                        wn_pos = synsets[0].pos()
+                        pos_reverse_map = {"n": "NOUN", "v": "VERB", "a": "ADJ", "r": "ADV"}
+                        if wn_pos in pos_reverse_map:
+                            pos_tag = pos_reverse_map[wn_pos]
+
+                        targets.append({
+                            "idx": i,
+                            "span_len": n,
+                            "surface": phrase_display,
+                            "lemma": phrase_lemma_underscore,
+                            "display_word": phrase_display,
+                            "pos": pos_tag,
+                            "tag": "NNP" if pos_tag == "NOUN" else "VB",
+                            "doc_tokens_text": doc_tokens_text,
+                            "is_phrase": True,
+                            "synsets": synsets,
+                        })
+
+                        for idx in range(i, i + n):
+                            used_indices.add(idx)
+
+            # 2. Single word target extraction for unconsumed tokens
             for idx, token in enumerate(doc):
+                if idx in used_indices:
+                    continue
                 if (token.is_alpha and not token.is_stop
                         and token.pos_ in ("NOUN", "VERB", "ADJ", "ADV")):
                     targets.append({
                         "idx": idx,
+                        "span_len": 1,
                         "surface": token.text,
                         "lemma": token.lemma_.lower(),
+                        "display_word": token.lemma_.lower(),
                         "pos": token.pos_,
                         "tag": token.tag_,
                         "doc_tokens_text": doc_tokens_text,
+                        "is_phrase": False,
                     })
+
+            targets.sort(key=lambda x: x["idx"])
             return targets
+
         else:
             words = sentence_text.split()
-            return [
-                {
-                    "idx": i,
-                    "surface": w,
-                    "lemma": w.lower(),
-                    "pos": "NOUN",
-                    "tag": "NN",
-                    "doc_tokens_text": words,
-                }
-                for i, w in enumerate(words)
-                if w.isalpha() and len(w) > 2
-            ]
+            targets = []
+            used_indices = set()
+            n_tokens = len(words)
+
+            for n in range(4, 1, -1):
+                for i in range(n_tokens - n + 1):
+                    if any(idx in used_indices for idx in range(i, i + n)):
+                        continue
+                    span_words = [w.lower() for w in words[i:i+n] if w.isalpha()]
+                    if len(span_words) < 2:
+                        continue
+                    phrase_underscore = "_".join(span_words)
+                    phrase_display = " ".join(words[i:i+n])
+                    synsets = self._get_synsets(phrase_underscore, "")
+                    if synsets:
+                        targets.append({
+                            "idx": i,
+                            "span_len": n,
+                            "surface": phrase_display,
+                            "lemma": phrase_underscore,
+                            "display_word": phrase_display,
+                            "pos": "NOUN",
+                            "tag": "NN",
+                            "doc_tokens_text": words,
+                            "is_phrase": True,
+                            "synsets": synsets,
+                        })
+                        for idx in range(i, i + n):
+                            used_indices.add(idx)
+
+            for i, w in enumerate(words):
+                if i in used_indices:
+                    continue
+                if w.isalpha() and len(w) > 2:
+                    targets.append({
+                        "idx": i,
+                        "span_len": 1,
+                        "surface": w,
+                        "lemma": w.lower(),
+                        "display_word": w.lower(),
+                        "pos": "NOUN",
+                        "tag": "NN",
+                        "doc_tokens_text": words,
+                        "is_phrase": False,
+                    })
+
+            targets.sort(key=lambda x: x["idx"])
+            return targets
 
     def _inflect_word(self, lemma: str, tag: str) -> str:
         """Inflect lemma into surface form matching grammatical tag."""
@@ -387,34 +413,19 @@ class VocabService:
 
     def _rerank_senses(
         self,
-        sentence_words: List[str],
         target_pos: Optional[str],
         top_k_senses: List[Tuple[str, float]],
     ) -> Tuple[str, float]:
         """
-        Composite reranking: 0.70 * vote_score + 0.20 * domain_boost + 0.10 * pos_bonus.
+        Composite reranking: 0.80 * vote_score + 0.20 * pos_bonus.
         """
-        sentence_set = set(sentence_words)
-
-        domain_hits: Dict[str, int] = {}
-        for domain, kws in self._DOMAIN_KEYWORDS.items():
-            domain_hits[domain] = len(sentence_set & set(kws))
-
         best_name, best_score = top_k_senses[0]
 
         for syn_name, vote_score in top_k_senses:
             sense_pos = syn_name.split(".")[1] if syn_name.count(".") >= 1 else ""
             pos_bonus = 1.0 if (target_pos and sense_pos == target_pos) else 0.5
 
-            domain_boost = 0.0
-            for domain, hit_count in domain_hits.items():
-                if hit_count > 0:
-                    for prefix in self._DOMAIN_SENSE_AFFINITY.get(domain, []):
-                        if syn_name.startswith(prefix):
-                            domain_boost = min(1.0, hit_count * 0.5)
-                            break
-
-            composite = 0.70 * vote_score + 0.20 * domain_boost + 0.10 * pos_bonus
+            composite = 0.80 * vote_score + 0.20 * pos_bonus
             if composite > best_score:
                 best_score = composite
                 best_name  = syn_name
@@ -432,27 +443,18 @@ class VocabService:
     ) -> List[str]:
         """
         Build Vietnamese meanings in priority order:
-        P1 (instant)  → offline _SENSE_VI_MAP lookup by exact synset name
-        P2 (Gemini)   → translate target word IN CONTEXT using Gemini AI Model
-        P3 (online)   → fallback translate best synonym substitutes via Google / MyMemory
-        P4 (verify)   → promote meanings appearing in translated_sentence
-        P5 (fallback) → _FALLBACK_DICT
+        P1 (Gemini)   → translate target word IN CONTEXT using Gemini AI Model
+        P2 (online)   → fallback translate best synonym substitutes via Google / MyMemory
+        P3 (verify)   → promote meanings appearing in translated_sentence
         """
-        # P1: Offline exact map
-        offline = self._lookup_vi(synset_name)
-        if offline:
-            if translated_sentence:
-                return self._verify_against_translation(offline, translated_sentence)
-            return offline
-
-        # P2: Gemini AI Contextual Translation
+        # P1: Gemini AI Contextual Translation
         gemini_vi = await self._translate_with_gemini(word, sentence_text, definition)
         if gemini_vi:
             if translated_sentence:
                 return self._verify_against_translation(gemini_vi, translated_sentence)
             return gemini_vi
 
-        # P3: Online translators fallback (Google / MyMemory)
+        # P2: Online translators fallback (Google / MyMemory)
         candidates: List[str] = []
         probes = list(best_substitutes[:2])
         if definition:
@@ -477,7 +479,7 @@ class VocabService:
         if candidates:
             return candidates[:3]
 
-        return self._FALLBACK_DICT.get(word, [word])
+        return []
 
     async def _translate_with_gemini(
         self,
@@ -549,29 +551,91 @@ class VocabService:
             logger.debug(f"[{engine}] translate '{term}': {e}")
             return []
 
-    def _lookup_vi(self, synset_name: str) -> List[str]:
-        """Exact lookup from offline sense map."""
-        if synset_name in self._SENSE_VI_MAP:
-            return list(self._SENSE_VI_MAP[synset_name])
-        return []
-
-    def _build_fallback_item(self, word: str, sentence_text: str, pos_tag: str) -> VocabItem:
-        vi = self._FALLBACK_DICT.get(word, [word])
+    def _build_fallback_item(
+        self,
+        word: str,
+        sentence_text: str,
+        pos_tag: str,
+        is_translated: bool = False,
+        source_lang: Optional[str] = None,
+        is_phrase: bool = False,
+    ) -> VocabItem:
         return VocabItem(
             word=word,
-            contextual_meaning=", ".join(vi),
+            contextual_meaning=None,
             context_sentence=sentence_text,
-            simple_example=f"Example using {word}.",
-            concept_definition=f"No WordNet definition found for '{word}'.",
-            synonyms=[], antonyms=[],
-            context_id=f"ctx_fallback_{word}",
+            simple_example=None,
+            concept_definition=None,
+            synonyms=[],
+            antonyms=[],
+            context_id=None,
             similarity_score=0.0,
+            is_translated=is_translated,
+            source_lang=source_lang,
+            is_phrase=is_phrase,
         )
 
-    def _get_synsets(self, word: str, pos_tag: str):
+    def _get_synsets(self, word_input, pos_tag: str = ""):
         pos_map = {"NOUN": wn.NOUN, "VERB": wn.VERB, "ADJ": wn.ADJ, "ADV": wn.ADV}
         wn_pos = pos_map.get(pos_tag)
-        try:
-            return wn.synsets(word, pos=wn_pos) if wn_pos else wn.synsets(word)
-        except Exception:
-            return []
+
+        if isinstance(word_input, list):
+            raw_words = word_input
+        elif isinstance(word_input, str):
+            raw_words = [word_input]
+        else:
+            raw_words = []
+
+        candidates = []
+        for w in raw_words:
+            if not w:
+                continue
+            candidates.append(w)
+            candidates.append(w.replace("_", "-"))
+            candidates.append(w.replace("-", "_"))
+            if "-" in w or "_" in w:
+                candidates.append(w.replace("_", ""))
+                candidates.append(w.replace("-", ""))
+
+        seen = set()
+        unique_candidates = []
+        for c in candidates:
+            c_lower = c.lower()
+            if c_lower not in seen:
+                seen.add(c_lower)
+                unique_candidates.append(c_lower)
+                if wn_pos:
+                    m = wn.morphy(c_lower, wn_pos)
+                else:
+                    m = wn.morphy(c_lower)
+                if m and m not in seen:
+                    seen.add(m)
+                    unique_candidates.append(m)
+
+        synsets = []
+        if wn_pos:
+            for c in unique_candidates:
+                try:
+                    res = wn.synsets(c, pos=wn_pos)
+                    if res:
+                        synsets.extend(res)
+                except Exception:
+                    pass
+
+        if not synsets:
+            for c in unique_candidates:
+                try:
+                    res = wn.synsets(c)
+                    if res:
+                        synsets.extend(res)
+                except Exception:
+                    pass
+
+        dedup_synsets = []
+        synset_names = set()
+        for s in synsets:
+            if s.name() not in synset_names:
+                synset_names.add(s.name())
+                dedup_synsets.append(s)
+
+        return dedup_synsets
