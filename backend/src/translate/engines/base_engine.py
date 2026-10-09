@@ -71,6 +71,13 @@ class TranslateEngine(ABC):
     def translate(self, source_lang, target_lang, text: str):
         pass
 
+    async def translate_batch(self, source_lang: str, target_lang: str, texts: list[str]) -> list[str]:
+        results = []
+        for text in texts:
+            res = await self.translate(source_lang, target_lang, text)
+            results.append(res)
+        return results
+
     @abstractmethod
     def start_engine(self):
         pass

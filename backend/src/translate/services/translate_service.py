@@ -14,13 +14,17 @@ class TranslateService:
             logger.warning(f"Could not switch engine during init: {e}")
 
     async def translate(self, source: TranslateMode, chunks: list[Chunk]) -> AsyncGenerator[TranslateResponse, None]:
-        for chunk in chunks:
-            try:
-                res = await self.engine_manager.translate(source, chunk.chunk_text)
-            except Exception as e:
-                logger.error(f"Translation failed for chunk: {e}")
-                res = ""
+        if not chunks:
+            return
 
+        chunk_texts = [c.chunk_text for c in chunks]
+        try:
+            translated_texts = await self.engine_manager.translate_batch(source, chunk_texts)
+        except Exception as e:
+            logger.error(f"Batch translation in TranslateService failed: {e}")
+            translated_texts = chunk_texts
+
+        for chunk, res in zip(chunks, translated_texts):
             yield TranslateResponse(
                 original_text=chunk.chunk_text,
                 translated_text=res if res else chunk.chunk_text,

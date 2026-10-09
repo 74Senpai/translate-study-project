@@ -1,5 +1,6 @@
 import asyncio
 from deep_translator import MyMemoryTranslator
+from typing import List
 from src.translate.engines.base_engine import TranslateEngine
 from loguru import logger
 
@@ -73,6 +74,27 @@ class MyMemoryEngine(TranslateEngine):
         self.current_session_token_use_count += len(text)
         self.current_session_rate_count += 1
         return result
+
+    async def translate_batch(
+        self, source_lang: str, target_lang: str, texts: List[str]
+    ) -> List[str]:
+        """Batch translation with staggered delays to avoid MyMemory rate limits."""
+        if not texts:
+            return []
+
+        async def _safe_translate(text: str, delay: float) -> str:
+            if delay > 0:
+                await asyncio.sleep(delay)
+            try:
+                return await self.translate(source_lang, target_lang, text)
+            except Exception as e:
+                logger.warning(f"Batch item failed in {self.name_engine}: {e}")
+                return text
+
+        # Stagger requests by 0.3s to avoid MyMemory rate limiting
+        tasks = [_safe_translate(t, i * 0.3) for i, t in enumerate(texts)]
+        results = await asyncio.gather(*tasks)
+        return list(results)
 
     def start_engine(self):
         try:

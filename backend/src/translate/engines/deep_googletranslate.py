@@ -1,6 +1,7 @@
 import asyncio
 from datetime import datetime
 from deep_translator import GoogleTranslator
+from typing import List
 from src.translate.engines.base_engine import TranslateEngine
 from loguru import logger
 
@@ -46,6 +47,23 @@ class DeepGoogleTranslate(TranslateEngine):
         self.current_session_token_use_count += len(text)
         self.current_session_rate_count += 1
         return result
+
+    async def translate_batch(
+        self, source_lang: str, target_lang: str, texts: List[str]
+    ) -> List[str]:
+        """Batch translation using asyncio.gather for parallel requests."""
+        if not texts:
+            return []
+
+        async def _safe_translate(text: str) -> str:
+            try:
+                return await self.translate(source_lang, target_lang, text)
+            except Exception as e:
+                logger.warning(f"Batch item failed in {self.name_engine}: {e}")
+                return text
+
+        results = await asyncio.gather(*[_safe_translate(t) for t in texts])
+        return list(results)
 
     def start_engine(self):
         try:

@@ -1,26 +1,24 @@
 """
 Contextual Word Sense Disambiguation (WSD) & Meaning Extraction Pipeline
 
-Pipeline Architecture (Inflected Synonym Substitution + Trace-Back):
-  1. SpaCy Token & POS Analysis:
-     - Parse sentence into tokens with surface form, lemma, POS, POS tag (e.g. VBZ, NNS, VBD), and index.
-  2. Candidate Generation & Synonym Inflection:
-     - Retrieve WordNet synsets for target token's lemma & POS.
-     - Collect synonym lemmas for each synset (fallback to definition content words if 0 external synonyms).
-     - Inflect each synonym lemma to match the exact grammatical tag of the target token via `lemminflect`
-       (e.g., "operate" + VBZ -> "operates", "firm" + NNS -> "firms").
-  3. Sentence Variant Generation:
-     - Replace token at index `i` in original sentence with `inflected_synonym`.
-  4. Embedding & Cosine Similarity:
-     - Compute vector embedding for original sentence and each variant sentence.
-     - Measure cosine similarity between original sentence vector and variant sentence vector.
-   5. Top Variants & Synset Trace-Back:
-      - Rank variant sentences by similarity.
-      - Trace back variants to originating synsets & compute synset vote score.
-      - Rerank with POS match bonus.
-   6. Vietnamese Meaning & Sentence Verification:
-      - Translate best substituting synonyms / sense definition.
-      - If `translated_sentence` is provided, verify and promote Vietnamese terms present in it.
+Pipeline Architecture (5-Method Weighted WSD):
+  1. Context Window & SpaCy Token/POS Extraction:
+     - Parse sentence into tokens with surface form, lemma, POS, POS tag, and index.
+     - Extract surrounding context window of configurable size (`wsd_context_window_size`).
+  2. Five-Method Sense Scoring:
+     - Method 1 (Sentence Embedding, 40%): Embedding câu gốc vs embedding câu thay thế từ đồng nghĩa.
+     - Method 2 (Context Synonym, 30%): Embedding context window vs embedding context window thay thế từ đồng nghĩa.
+     - Method 3 (WordNet Lesk, 10%): Thuật toán Lesk overlap gloss/examples với context window.
+     - Method 4 (Context Definition, 10%): Embedding context window vs embedding definition của sense.
+     - Method 5 (Generated Example, 10%): Tạo example cùng số từ với context, so sánh embedding.
+  3. Percentage Weighted Combination:
+     - Combine 5 method scores using weights from `.env` config.
+  4. Trust Mechanism:
+     - Composite score >= `wsd_trust_threshold` → is_trusted = True.
+  5. Composite Reranking & Sense Selection:
+     - Rank senses by composite score with POS match bonus.
+  6. Vietnamese Meaning Assignment & Translation:
+     - Translate target word in context via Gemini AI Model (or online fallback) verified with translated sentence.
 """
 
 from typing import List, Optional, Dict, Tuple
@@ -30,6 +28,7 @@ import lemminflect
 from loguru import logger
 import nltk
 from nltk.corpus import wordnet as wn
+from nltk.wsd import lesk
 from deep_translator import GoogleTranslator, MyMemoryTranslator
 from google import genai
 from google.genai import types as genai_types
@@ -43,7 +42,14 @@ from src.translate.services.embedding_service import EmbeddingService
 
 class VocabService:
     """
-    WSD Service using Inflected Synonym Substitution & Synset Trace-Back (WordNet data only).
+    5-Method Contextual Word Sense Disambiguation (WSD) Service.
+    Combines:
+      - M1: Sentence Embedding Similarity (sentence vs synonym-substituted sentence)
+      - M2: Context Window Synonym Substitution Embedding Similarity
+      - M3: WordNet Lesk algorithm with Context Window
+      - M4: Context Window vs Sense Definition Embedding Similarity
+      - M5: Generated Example (same word count as context) Embedding Similarity
+    Configurable via .env weights & trust threshold.
     """
 
     def __init__(
@@ -60,7 +66,7 @@ class VocabService:
         except Exception as e:
             logger.warning(f"Could not load SpaCy model in VocabService: {e}")
 
-        for pkg in ("wordnet", "omw-1.4", "punkt"):
+        for pkg in ("wordnet", "omw-1.4", "punkt", "stopwords"):
             try:
                 nltk.download(pkg, quiet=True)
             except Exception as e:
@@ -88,16 +94,37 @@ class VocabService:
         source_lang: Optional[str] = None,
     ) -> VocabAnalysisResponse:
         """
-        Analyse content target words using Inflected Synonym Substitution & Trace-Back WSD.
+        Analyse content target words using 5-Method Weighted WSD with trust mechanism.
         """
         if not sentence_text or not sentence_text.strip():
             return VocabAnalysisResponse(sentence=sentence_text, vocabularies=[])
 
-        sentence_words = [w.lower() for w in sentence_text.split() if w.isalpha()]
         target_tokens = self._extract_target_tokens(sentence_text)
 
         # Pre-embed original sentence
         original_vec = self.embedding_service.get_embedding(sentence_text)
+
+        # Load configurable weights & context window from .env settings
+        settings = get_settings()
+        w_sentence_embed = float(getattr(settings, "wsd_weight_sentence_embed", 40.0))
+        w_ctx_synonym = float(getattr(settings, "wsd_weight_ctx_synonym", 30.0))
+        w_lesk = float(getattr(settings, "wsd_weight_lesk", 10.0))
+        w_ctx_def = float(getattr(settings, "wsd_weight_ctx_definition", 10.0))
+        w_gen_ex = float(getattr(settings, "wsd_weight_generated_example", 10.0))
+        window_size = int(getattr(settings, "wsd_context_window_size", 5))
+        wsd_top_k = int(getattr(settings, "wsd_top_k", 6))
+        max_synonyms = int(getattr(settings, "wsd_max_synonyms", 5))
+        trust_threshold = float(getattr(settings, "wsd_trust_threshold", 0.65))
+
+        total_weight = w_sentence_embed + w_ctx_synonym + w_lesk + w_ctx_def + w_gen_ex
+        if total_weight <= 0:
+            w1, w2, w3, w4, w5 = 0.4, 0.3, 0.1, 0.1, 0.1
+        else:
+            w1 = w_sentence_embed / total_weight
+            w2 = w_ctx_synonym / total_weight
+            w3 = w_lesk / total_weight
+            w4 = w_ctx_def / total_weight
+            w5 = w_gen_ex / total_weight
 
         vocab_items: List[VocabItem] = []
         pos_map = {"NOUN": "n", "VERB": "v", "ADJ": "a", "ADV": "r"}
@@ -129,11 +156,23 @@ class VocabService:
                 )
                 continue
 
-            # ── Stage 1 & 2: Candidates + Inflected Synonym Variants ─────────
-            synset_info: Dict[str, dict] = {}
-            variants: List[Tuple[str, str, str, str]] = []  # (var_sent, syn_lemma, inflected, synset_name)
-
             all_tokens_text = t_info["doc_tokens_text"]
+            window_tokens, window_text = self._extract_context_window(
+                all_tokens_text, token_idx, span_len, window_size
+            )
+
+            # Pre-embed context window for M2, M4, M5
+            context_window_vec = self.embedding_service.get_embedding(window_text)
+
+            # ── Candidate Preparation & 5-Method Feature Calculation ─────
+            synset_info: Dict[str, dict] = {}
+            # M1: sentence-level synonym variants
+            sentence_variants: List[Tuple[str, str, str, str]] = []
+            # M2: context-window-level synonym variants
+            context_variants: List[Tuple[str, str, str, str]] = []
+            m3_lesk_scores: Dict[str, float] = {}
+            m4_ctx_def_scores: Dict[str, float] = {}
+            m5_gen_ex_scores: Dict[str, float] = {}
 
             for syn in synsets:
                 syn_name = syn.name()
@@ -150,6 +189,9 @@ class VocabService:
                     ]
                     syn_lemmas = def_words[:4]
 
+                # Max synonyms per sense rule (configurable via wsd_max_synonyms)
+                syn_lemmas = syn_lemmas[:max_synonyms]
+
                 synset_info[syn_name] = {
                     "synset": syn,
                     "pos": syn.pos(),
@@ -160,41 +202,111 @@ class VocabService:
                     "context_id": f"ctx_wn_{syn_name}",
                 }
 
+                # ── M3: WordNet Lesk score (dual: trimmed context + full sentence) ──
+                m3_lesk_scores[syn_name] = self._compute_lesk_score(
+                    syn=syn,
+                    window_tokens=window_tokens,
+                    full_sentence_tokens=all_tokens_text,
+                    target_lemma=lemma,
+                    wn_pos=wn_pos,
+                    stopwords=stopwords,
+                )
+
+                # ── M4: Context Window vs Definition Embedding ─────────────
+                m4_ctx_def_scores[syn_name] = self._compute_ctx_definition_score(
+                    syn=syn,
+                    context_window_vec=context_window_vec,
+                )
+
+                # ── M5: Generated Example Similarity ──────────────────────
+                m5_gen_ex_scores[syn_name] = self._compute_generated_example_score(
+                    syn=syn,
+                    target_word=display_word,
+                    context_word_count=len(window_tokens),
+                    context_window_vec=context_window_vec,
+                )
+
+                # Collect variants for M1 (sentence) and M2 (context window)
                 for s_lemma in syn_lemmas:
-                    # Inflect synonym to match exact target token tag
                     inflected = self._inflect_word(s_lemma, tag)
-                    
-                    # Substitute token / phrase span at token_idx in sentence
-                    var_words = (
+
+                    # M1 variant: full sentence with synonym substitution
+                    var_sent_words = (
                         all_tokens_text[:token_idx]
                         + [inflected]
                         + all_tokens_text[token_idx + span_len:]
                     )
-                    var_sent = " ".join(var_words)
+                    var_sent = " ".join(var_sent_words)
+                    sentence_variants.append((var_sent, s_lemma, inflected, syn_name))
 
-                    variants.append((var_sent, s_lemma, inflected, syn_name))
+                    # M2 variant: context window with synonym substitution
+                    window_start = max(0, token_idx - window_size)
+                    relative_idx = token_idx - window_start
+                    var_ctx_tokens = list(window_tokens)
+                    if 0 <= relative_idx < len(var_ctx_tokens):
+                        var_ctx_tokens[relative_idx] = inflected
+                    var_ctx_text = " ".join(var_ctx_tokens)
+                    context_variants.append((var_ctx_text, s_lemma, inflected, syn_name))
 
-            # ── Stage 3: Embedding & Similarity Scoring ────────────────────────
-            synonym_scores: List[Tuple[str, str, float]] = []  # (syn_lemma, synset_name, score)
-            for var_sent, s_lemma, inflected, syn_name in variants:
+            # ── M1: Sentence Embedding Similarity Scoring ──────────────────
+            m1_synonym_scores: List[Tuple[str, str, float]] = []
+            for var_sent, s_lemma, inflected, syn_name in sentence_variants:
                 var_vec = self.embedding_service.get_embedding(var_sent)
-                score   = self.embedding_service.compute_vector_similarity(original_vec, var_vec)
-                synonym_scores.append((s_lemma, syn_name, score))
+                score = self.embedding_service.compute_vector_similarity(original_vec, var_vec)
+                m1_synonym_scores.append((s_lemma, syn_name, float(score)))
 
-            # ── Stage 4: Sense Voting & Trace-Back ────────────────────────────
+            # TopK formula for M1: sum of scores of sense in top K divided by K (default 6)
+            sorted_m1 = sorted(m1_synonym_scores, key=lambda x: x[2], reverse=True)
+            top_k_m1 = sorted_m1[:wsd_top_k]
+
+            m1_scores: Dict[str, float] = {}
+            for syn in synsets:
+                syn_name = syn.name()
+                synset_top_scores = [score for s_lemma, s_name, score in top_k_m1 if s_name == syn_name]
+                m1_scores[syn_name] = (sum(synset_top_scores) / float(wsd_top_k)) if wsd_top_k > 0 else 0.0
+
+            # ── M2: Context Window Synonym Substitution Similarity ─────────
+            m2_synonym_scores: List[Tuple[str, str, float]] = []
+            for var_ctx, s_lemma, inflected, syn_name in context_variants:
+                var_vec = self.embedding_service.get_embedding(var_ctx)
+                score = self.embedding_service.compute_vector_similarity(context_window_vec, var_vec)
+                m2_synonym_scores.append((s_lemma, syn_name, float(score)))
+
+            # TopK formula for M2: sum of scores of sense in top K divided by K (default 6)
+            sorted_m2 = sorted(m2_synonym_scores, key=lambda x: x[2], reverse=True)
+            top_k_m2 = sorted_m2[:wsd_top_k]
+
+            m2_scores: Dict[str, float] = {}
+            for syn in synsets:
+                syn_name = syn.name()
+                synset_top_scores = [score for s_lemma, s_name, score in top_k_m2 if s_name == syn_name]
+                m2_scores[syn_name] = (sum(synset_top_scores) / float(wsd_top_k)) if wsd_top_k > 0 else 0.0
+
+            # ── 5-Method Weighted Score Fusion ────────────────────────────
             synset_votes: Dict[str, float] = {}
-            synset_syn_scores: Dict[str, List[float]] = {}
-            for syn_lemma, syn_name, score in synonym_scores:
-                synset_syn_scores.setdefault(syn_name, []).append(score)
+            synset_method_details: Dict[str, dict] = {}
+            for syn in synsets:
+                syn_name = syn.name()
+                s1 = m1_scores.get(syn_name, 0.0)
+                s2 = m2_scores.get(syn_name, 0.0)
+                s3 = m3_lesk_scores.get(syn_name, 0.0)
+                s4 = m4_ctx_def_scores.get(syn_name, 0.0)
+                s5 = m5_gen_ex_scores.get(syn_name, 0.0)
 
-            for syn_name, scores in synset_syn_scores.items():
-                synset_votes[syn_name] = (
-                    0.70 * max(scores) + 0.30 * (sum(scores) / len(scores))
-                )
+                composite = (w1 * s1) + (w2 * s2) + (w3 * s3) + (w4 * s4) + (w5 * s5)
+                synset_votes[syn_name] = composite
+                synset_method_details[syn_name] = {
+                    "m1_sentence_embed": round(s1, 4),
+                    "m2_ctx_synonym": round(s2, 4),
+                    "m3_lesk": round(s3, 4),
+                    "m4_ctx_definition": round(s4, 4),
+                    "m5_generated_example": round(s5, 4),
+                    "composite": round(composite, 4),
+                }
 
-            top_k_senses = sorted(synset_votes.items(), key=lambda x: x[1], reverse=True)[:top_k]
+            top_k_senses = sorted(synset_votes.items(), key=lambda x: x[1], reverse=True)[:wsd_top_k]
 
-            # ── Stage 5: Composite Reranking ──────────────────────────────────
+            # ── Composite Reranking with POS match bonus ──────────────────
             if not top_k_senses:
                 best_synset_name = synsets[0].name()
                 best_score = 1.0
@@ -206,9 +318,12 @@ class VocabService:
 
             best_info = synset_info[best_synset_name]
 
-            # ── Stage 6: Meaning Assignment & Translation ─────────────────────
+            # ── Trust Mechanism ───────────────────────────────────────────
+            is_trusted = best_score >= trust_threshold
+
+            # ── Meaning Assignment & Translation ─────────────────────────
             winning_synonyms = sorted(
-                [(sl, score) for sl, sn, score in synonym_scores if sn == best_synset_name],
+                [(sl, score) for sl, sn, score in m1_synonym_scores if sn == best_synset_name],
                 key=lambda x: x[1], reverse=True
             )
             best_subs = [s for s, _ in winning_synonyms[:3]]
@@ -222,8 +337,8 @@ class VocabService:
                 translated_sentence=translated_sentence,
             )
 
-            synonyms = best_info["synonyms"][:5]
-            antonyms = best_info["antonyms"][:5]
+            synonyms = best_info["synonyms"][:max_synonyms]
+            antonyms = best_info["antonyms"][:max_synonyms]
             simple_ex = (best_info["examples"][0]
                          if best_info.get("examples") else None)
 
@@ -240,11 +355,216 @@ class VocabService:
                 is_translated=is_translated,
                 source_lang=source_lang,
                 is_phrase=is_phrase,
+                is_trusted=is_trusted,
+                wsd_method_scores=synset_method_details.get(best_synset_name),
             )
             self.repo.save_vocab_item(item)
             vocab_items.append(item)
 
         return VocabAnalysisResponse(sentence=sentence_text, vocabularies=vocab_items)
+
+    # ── Context Window & 5-Method Helpers ─────────────────────────────────────
+
+    def _extract_context_window(
+        self,
+        doc_tokens_text: List[str],
+        token_idx: int,
+        span_len: int = 1,
+        window_size: int = 5,
+    ) -> Tuple[List[str], str]:
+        """
+        Extract a window of `window_size` tokens around the target token/phrase.
+        Returns (window_tokens, window_text).
+        """
+        if window_size <= 0 or window_size >= len(doc_tokens_text):
+            return doc_tokens_text, " ".join(doc_tokens_text)
+
+        start_idx = max(0, token_idx - window_size)
+        end_idx = min(len(doc_tokens_text), token_idx + span_len + window_size)
+        window_tokens = doc_tokens_text[start_idx:end_idx]
+        window_text = " ".join(window_tokens)
+        return window_tokens, window_text
+
+    def _compute_single_lesk_score(
+        self,
+        syn: wn.synset,
+        context_tokens: List[str],
+        target_lemma: str,
+        wn_pos: Optional[str] = None,
+        stopwords: Optional[set] = None,
+    ) -> float:
+        """
+        WordNet Lesk overlap & NLTK lesk match score for a given token sequence.
+        """
+        if stopwords is None:
+            stopwords = {"a", "an", "the", "of", "or", "and", "in", "on", "at", "by", "for",
+                         "with", "to", "from", "as", "used", "is", "are", "be", "form", "combining"}
+
+        ctx_words = set(
+            w.lower() for w in context_tokens
+            if w.isalpha() and w.lower() not in stopwords and w.lower() != target_lemma.lower()
+        )
+
+        def_ex_text = (syn.definition() or "") + " " + " ".join(syn.examples() or [])
+        sig_words = set(
+            w.lower() for w in re.findall(r'\b[a-zA-Z]{2,}\b', def_ex_text)
+            if w.lower() not in stopwords
+        )
+
+        if not sig_words or not ctx_words:
+            overlap_score = 0.0
+        else:
+            intersection = ctx_words.intersection(sig_words)
+            union = ctx_words.union(sig_words)
+            jaccard = len(intersection) / len(union) if union else 0.0
+            ratio = len(intersection) / max(1, len(sig_words))
+            overlap_score = max(jaccard, ratio)
+
+        # NLTK WSD Lesk best match check
+        lesk_bonus = 0.0
+        try:
+            best_lesk = lesk(context_tokens, target_lemma, pos=wn_pos)
+            if best_lesk and best_lesk.name() == syn.name():
+                lesk_bonus = 1.0
+        except Exception as e:
+            logger.debug(f"NLTK Lesk error for '{target_lemma}': {e}")
+
+        return min(1.0, 0.60 * overlap_score + 0.40 * lesk_bonus)
+
+    def _compute_lesk_score(
+        self,
+        syn: wn.synset,
+        window_tokens: List[str],
+        full_sentence_tokens: List[str],
+        target_lemma: str,
+        wn_pos: Optional[str] = None,
+        stopwords: Optional[set] = None,
+    ) -> float:
+        """
+        Method 3: Dual WordNet Lesk score (trimmed context window + full sentence).
+        Calculates Lesk score for trimmed context window and full intact sentence,
+        then returns their average score.
+        """
+        score_trimmed = self._compute_single_lesk_score(
+            syn=syn,
+            context_tokens=window_tokens,
+            target_lemma=target_lemma,
+            wn_pos=wn_pos,
+            stopwords=stopwords,
+        )
+        score_full = self._compute_single_lesk_score(
+            syn=syn,
+            context_tokens=full_sentence_tokens,
+            target_lemma=target_lemma,
+            wn_pos=wn_pos,
+            stopwords=stopwords,
+        )
+        avg_score = (score_trimmed + score_full) / 2.0
+        return round(avg_score, 4)
+
+    def _compute_ctx_definition_score(
+        self,
+        syn: wn.synset,
+        context_window_vec,
+    ) -> float:
+        """
+        Method 4: Vector similarity between context window and synset definition.
+        Differs from old Method 3 by comparing context window embedding
+        against the sense definition embedding only (without examples mixed in).
+        """
+        def_text = syn.definition() or ""
+        if not def_text:
+            return 0.0
+
+        def_vec = self.embedding_service.get_embedding(def_text)
+        sim = self.embedding_service.compute_vector_similarity(context_window_vec, def_vec)
+        return round(max(0.0, float(sim)), 4)
+
+    def _compute_generated_example_score(
+        self,
+        syn: wn.synset,
+        target_word: str,
+        context_word_count: int,
+        context_window_vec,
+    ) -> float:
+        """
+        Method 5: Generate an example sentence for this sense that has the same
+        word count as the context window, then compare embeddings.
+        Uses synset examples + definition to build a synthetic example of matching length.
+        """
+        examples = syn.examples() or []
+        definition = syn.definition() or ""
+
+        # Build a candidate example from WordNet data
+        generated = self._generate_matching_length_example(
+            target_word=target_word,
+            definition=definition,
+            examples=examples,
+            target_word_count=context_word_count,
+        )
+
+        if not generated:
+            return 0.0
+
+        gen_vec = self.embedding_service.get_embedding(generated)
+        sim = self.embedding_service.compute_vector_similarity(context_window_vec, gen_vec)
+        return round(max(0.0, float(sim)), 4)
+
+    def _generate_matching_length_example(
+        self,
+        target_word: str,
+        definition: str,
+        examples: List[str],
+        target_word_count: int,
+    ) -> str:
+        """
+        Generate an example sentence with approximately `target_word_count` words
+        using wordnet examples and definition as source material.
+        """
+        if target_word_count <= 0:
+            target_word_count = 5
+
+        # Try to find/adapt the closest existing example
+        best_example = ""
+        best_diff = float("inf")
+        for ex in examples:
+            ex_words = ex.split()
+            diff = abs(len(ex_words) - target_word_count)
+            if diff < best_diff:
+                best_diff = diff
+                best_example = ex
+
+        # If we have a good example, adapt its length
+        if best_example:
+            words = best_example.split()
+            if len(words) == target_word_count:
+                return best_example
+            elif len(words) > target_word_count:
+                # Truncate keeping target word if present
+                return " ".join(words[:target_word_count])
+            else:
+                # Pad with definition words
+                def_words = definition.split()
+                while len(words) < target_word_count and def_words:
+                    words.append(def_words.pop(0))
+                return " ".join(words[:target_word_count])
+
+        # No example available — build from definition
+        if definition:
+            def_words = definition.split()
+            # Ensure target word is included
+            if target_word.lower() not in [w.lower() for w in def_words]:
+                def_words = [target_word] + def_words
+
+            if len(def_words) >= target_word_count:
+                return " ".join(def_words[:target_word_count])
+            else:
+                # Pad by repeating definition context
+                while len(def_words) < target_word_count:
+                    def_words.append(def_words[len(def_words) % max(1, len(definition.split()))])
+                return " ".join(def_words[:target_word_count])
+
+        return target_word
 
     # ── Private Helpers ────────────────────────────────────────────────────────
 
@@ -418,8 +738,13 @@ class VocabService:
     ) -> Tuple[str, float]:
         """
         Composite reranking: 0.80 * vote_score + 0.20 * pos_bonus.
+        Selects the sense with highest composite score without defaulting to top 1.
         """
-        best_name, best_score = top_k_senses[0]
+        if not top_k_senses:
+            return "", 0.0
+
+        best_name = top_k_senses[0][0]
+        best_score = -1.0
 
         for syn_name, vote_score in top_k_senses:
             sense_pos = syn_name.split(".")[1] if syn_name.count(".") >= 1 else ""
@@ -573,6 +898,8 @@ class VocabService:
             is_translated=is_translated,
             source_lang=source_lang,
             is_phrase=is_phrase,
+            is_trusted=False,
+            wsd_method_scores=None,
         )
 
     def _get_synsets(self, word_input, pos_tag: str = ""):

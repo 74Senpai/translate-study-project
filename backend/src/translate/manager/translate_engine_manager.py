@@ -96,6 +96,31 @@ class TranslateEngineManager:
         logger.error("All translation engines failed. Returning original text.")
         return text
 
+    async def translate_batch(self, source: TranslateMode, texts: list[str]) -> list[str]:
+        if not texts:
+            return []
+
+        if not self.current_engine:
+            self.switch_available_engine()
+
+        if self.current_engine and hasattr(self.current_engine, "translate_batch"):
+            try:
+                res = await self.current_engine.translate_batch(
+                    source.source_lang, source.target_lang, texts
+                )
+                if res and len(res) == len(texts):
+                    self.current_engine.set_infor(last_success_time=datetime.now())
+                    return res
+            except Exception as e:
+                logger.error(f"Batch translation failed on engine {getattr(self.current_engine, 'name_engine', 'Unknown')}: {e}")
+
+        # Fallback to single text translation loop
+        results = []
+        for text in texts:
+            r = await self.translate(source, text)
+            results.append(r)
+        return results
+
     def _mark_failed_and_switch(self, engine_name: str, cooldown_minutes: int = 30):
         if not self.current_engine:
             return

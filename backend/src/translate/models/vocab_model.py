@@ -15,6 +15,8 @@ class VocabItem(BaseModel):
     is_translated: bool = False
     source_lang: Optional[str] = None
     is_phrase: bool = False
+    is_trusted: bool = False
+    wsd_method_scores: Optional[dict] = None
 
 
 class VocabAnalysisResponse(BaseModel):
