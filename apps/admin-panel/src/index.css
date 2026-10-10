@@ -1,0 +1,75 @@
+@import "tailwindcss";
+
+/* Tiptap Editor Styles */
+.ProseMirror {
+  outline: none !important;
+}
+
+.ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  color: #adb5bd;
+  pointer-events: none;
+  height: 0;
+}
+
+.ProseMirror h2 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  margin-top: 1.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.ProseMirror h3 {
+  font-size: 1.25rem;
+  font-weight: 700;
+  margin-top: 1.25rem;
+  margin-bottom: 0.5rem;
+}
+
+.ProseMirror ul {
+  list-style-type: disc;
+  padding-left: 1.5rem;
+  margin-bottom: 1rem;
+}
+
+.ProseMirror ol {
+  list-style-type: decimal;
+  padding-left: 1.5rem;
+  margin-bottom: 1rem;
+}
+
+.ProseMirror table {
+  border-collapse: collapse;
+  table-layout: fixed;
+  width: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+.ProseMirror td, .ProseMirror th {
+  min-width: 1em;
+  border: 2px solid #ced4da;
+  padding: 3px 5px;
+  vertical-align: top;
+  box-sizing: border-box;
+  position: relative;
+}
+
+/* Rendered Content Styles (Prose) */
+.prose { @apply text-slate-700 leading-relaxed; }
+.prose h1 { @apply text-3xl font-bold mb-6 text-slate-900; }
+.prose h2 { @apply text-2xl font-bold mt-8 mb-4 text-slate-800; }
+.prose h3 { @apply text-xl font-bold mt-6 mb-3 text-slate-800; }
+.prose p { @apply mb-4 leading-relaxed; }
+.prose ul { @apply list-disc pl-6 mb-4; }
+.prose ol { @apply list-decimal pl-6 mb-4; }
+.prose li { @apply mb-1; }
+.prose strong { @apply font-black text-slate-900; }
+.prose em { @apply italic; }
+.prose u { @apply underline; }
+.prose mark { @apply bg-yellow-200 px-1 rounded-sm; }
+.prose blockquote { @apply border-l-4 border-slate-200 pl-4 italic my-4; }
+.prose code { @apply bg-slate-100 px-1.5 py-0.5 rounded text-sm font-mono text-pink-600; }
+.prose a { @apply text-blue-600 underline hover:text-blue-800; }
+.prose img { @apply rounded-2xl max-w-full h-auto my-6; }

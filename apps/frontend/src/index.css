@@ -1,0 +1,223 @@
+@import "tailwindcss";
+
+/* Bạn có thể giữ lại các font family hoặc custom base styles ở đây nếu cần */
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+  body {
+    @apply bg-slate-50 text-slate-800 font-sans antialiased;
+  }
+  ::selection {
+    @apply bg-blue-100 text-blue-900;
+  }
+}
+
+/* Custom Scrollbar for premium feel */
+::-webkit-scrollbar {
+  width: 8px;
+}
+::-webkit-scrollbar-track {
+  @apply bg-slate-100;
+}
+::-webkit-scrollbar-thumb {
+  @apply bg-slate-300 rounded-full hover:bg-slate-400 transition-colors;
+}
+
+/* Prose styles for Tiptap content rendering */
+.prose { @apply text-slate-700 leading-relaxed; }
+.prose h1 { @apply text-3xl font-black text-slate-900 mb-6 mt-8 tracking-tight; }
+.prose h2 { @apply text-2xl font-black text-slate-800 mb-4 mt-6 tracking-tight; }
+.prose h3 { @apply text-xl font-bold text-slate-800 mb-3 mt-5; }
+.prose p { @apply mb-4 leading-relaxed; }
+.prose ul { @apply list-disc pl-6 mb-4 space-y-1; }
+.prose ol { @apply list-decimal pl-6 mb-4 space-y-1; }
+.prose li { @apply mb-1; }
+.prose strong { @apply font-black text-slate-900; }
+.prose em { @apply italic text-slate-800; }
+.prose u { @apply underline decoration-slate-300; }
+.prose mark { @apply bg-yellow-200 px-1 rounded-sm; }
+.prose blockquote { @apply border-l-4 border-slate-200 pl-4 italic my-4; }
+.prose code { @apply bg-slate-100 px-1.5 py-0.5 rounded text-sm font-mono text-pink-600; }
+.prose a { @apply text-blue-600 underline hover:text-blue-800; }
+.prose img { @apply rounded-2xl max-w-full h-auto my-6; }
+
+/* Table optimization for mobile */
+.rendered-html-content table {
+  @apply w-full border-collapse my-6;
+  display: block;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Responsive overrides for baked-in paddings in generated HTML */
+.rendered-html-content .block-formula,
+.rendered-html-content .block-example,
+.rendered-html-content .block-quiz {
+  padding: 0.875rem !important;
+  border-radius: 1rem !important;
+}
+
+.rendered-html-content .block-quote {
+  padding: 1rem 1.25rem !important;
+  border-radius: 0 !important;
+}
+
+.rendered-html-content .block-flashcard {
+  @apply p-8 bg-amber-50/50 border-2 border-amber-100 rounded-[2.5rem] mb-12 relative overflow-hidden;
+  background-color: rgba(255, 191, 0, 0.05) !important;
+  border-color: #fef3c7 !important;
+}
+
+.rendered-html-content .block-flashcard h3 {
+  @apply text-2xl font-black text-slate-900 mb-2 mt-0;
+}
+
+.rendered-html-content .block-flashcard p {
+  @apply text-slate-600 text-sm leading-relaxed mb-4;
+}
+
+/* Mobile Font Size Optimizations */
+.rendered-html-content h1 { @apply text-2xl md:text-4xl mb-6; }
+.rendered-html-content h2 { @apply text-xl md:text-3xl mb-5; }
+.rendered-html-content h3 { @apply text-lg md:text-2xl mb-4; }
+.rendered-html-content p { @apply text-sm md:text-base leading-relaxed mb-4; }
+.rendered-html-content ul, .rendered-html-content ol { @apply text-sm md:text-base mb-4; }
+
+@media (min-width: 768px) {
+  .rendered-html-content .block-formula,
+  .rendered-html-content .block-example,
+  .rendered-html-content .block-quiz {
+    padding: 1.25rem !important;
+    border-radius: 1.5rem !important;
+  }
+  .rendered-html-content .block-quote {
+    padding: 1.5rem 2rem !important;
+    border-radius: 0 !important;
+  }
+  .rendered-html-content .block-flashcard {
+    padding: 2.5rem !important;
+    border-radius: 3rem !important;
+  }
+}
+
+.rendered-html-content table {
+  width: 100% !important;
+  border-collapse: collapse !important;
+  margin-bottom: 1rem !important;
+  display: block;
+  overflow-x: auto;
+  white-space: nowrap;
+  -webkit-overflow-scrolling: touch;
+}
+
+.rendered-html-content th,
+.rendered-html-content td {
+  padding: 0.45rem 0.65rem !important;
+  font-size: 0.8125rem !important;
+}
+
+.rendered-html-content th {
+  text-transform: uppercase !important;
+  letter-spacing: 0.08em !important;
+  font-weight: 800 !important;
+}
+
+.rendered-html-content .quiz-header {
+  margin-bottom: 0.875rem !important;
+  padding-bottom: 0.625rem !important;
+  gap: 0.625rem !important;
+}
+
+.rendered-html-content .quiz-title {
+  text-transform: none !important;
+  letter-spacing: normal !important;
+  font-size: 0.9375rem !important;
+  font-weight: 800 !important;
+}
+
+.rendered-html-content .quiz-progress {
+  padding: 0.2rem 0.55rem !important;
+  border-radius: 999px !important;
+}
+
+.rendered-html-content .q-text {
+  font-size: 0.95rem !important;
+  margin-bottom: 0.875rem !important;
+}
+
+.rendered-html-content .q-options {
+  gap: 0.625rem !important;
+  margin-bottom: 0.875rem !important;
+}
+
+.rendered-html-content .q-opt {
+  padding: 0.75rem 0.875rem !important;
+  border-radius: 0.875rem !important;
+}
+
+.rendered-html-content .q-opt span {
+  font-size: 0.9rem !important;
+}
+
+.rendered-html-content .q-fill-input {
+  padding: 0.75rem 0.875rem !important;
+  margin-bottom: 0.875rem !important;
+  border-radius: 0.875rem !important;
+  font-size: 0.95rem !important;
+}
+
+.rendered-html-content .q-footer {
+  margin-top: 1rem !important;
+  padding-top: 0.875rem !important;
+  gap: 0.625rem !important;
+}
+
+.rendered-html-content .q-btn {
+  padding: 0.625rem 0.875rem !important;
+  border-radius: 0.75rem !important;
+  font-size: 0.75rem !important;
+}
+
+.rendered-html-content .q-exp {
+  margin-top: 0.875rem !important;
+  padding: 0.875rem !important;
+  border-radius: 0.875rem !important;
+}
+
+.rendered-html-content .quiz-result {
+  padding: 1.25rem 0.75rem !important;
+}
+
+.rendered-html-content .quiz-result h3 {
+  font-size: 1.35rem !important;
+  margin-bottom: 0.5rem !important;
+}
+
+.rendered-html-content .quiz-result p {
+  font-size: 0.95rem !important;
+  margin-bottom: 1rem !important;
+}
+
+.rendered-html-content .quiz-score {
+  font-size: 2.4rem !important;
+  margin-bottom: 0.875rem !important;
+}
+
+@media (min-width: 768px) {
+  .rendered-html-content table {
+    display: table;
+    overflow-x: visible;
+    white-space: normal;
+  }
+  .rendered-html-content th,
+  .rendered-html-content td {
+    padding: 0.75rem 1rem !important;
+    font-size: 0.95rem !important;
+  }
+}
+
+/* Specific fix for quiz cards redundancy */
+.quiz-list {
+  @apply space-y-4 md:space-y-8;
+}

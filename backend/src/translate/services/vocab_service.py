@@ -127,7 +127,7 @@ class VocabService:
             w5 = w_gen_ex / total_weight
 
         vocab_items: List[VocabItem] = []
-        pos_map = {"NOUN": "n", "VERB": "v", "ADJ": "a", "ADV": "r"}
+        pos_map = {"NOUN": "n", "VERB": "v", "ADJ": "a", "ADV": "r", "PROPN": "n"}
         stopwords = {"a", "an", "the", "of", "or", "and", "in", "on", "at", "by", "for",
                      "with", "to", "from", "as", "used", "is", "are", "be", "form", "combining"}
 
@@ -143,17 +143,87 @@ class VocabService:
             wn_pos    = pos_map.get(pos_tag, None)
 
             synsets = t_info.get("synsets") or self._get_synsets(lemma, pos_tag)
+
+            # ── Case: no synsets at all → translate directly ───────────────────
             if not synsets:
-                vocab_items.append(
-                    self._build_fallback_item(
+                vi_meanings = await self._translate_direct(
+                    word=display_word,
+                    sentence_text=sentence_text,
+                    translated_sentence=translated_sentence,
+                )
+                item = self._build_direct_item(
+                    word=display_word,
+                    sentence_text=sentence_text,
+                    vi_meanings=vi_meanings,
+                    is_translated=is_translated,
+                    source_lang=source_lang,
+                    is_phrase=is_phrase,
+                )
+                self.repo.save_vocab_item(item)
+                vocab_items.append(item)
+                continue
+
+            # ── Case: only 1 sense OR 1 sense with no synonyms → translate directly ──
+            single_sense_no_wsd = False
+            if len(synsets) == 1:
+                single_sense_no_wsd = True
+            elif len(synsets) > 1:
+                # Check if all senses combined have no usable synonyms
+                all_synonyms = []
+                for syn in synsets:
+                    raw_lemmas = [l.name().replace("_", " ") for l in syn.lemmas()]
+                    syn_lemmas = [l for l in raw_lemmas
+                                  if l.lower() != lemma.lower() and l.lower() != display_word.lower()]
+                    all_synonyms.extend(syn_lemmas)
+                # Only treat as "no synonyms" when exactly 1 synset has no external synonyms
+                if len(synsets) == 1 and not all_synonyms:
+                    single_sense_no_wsd = True
+
+            if single_sense_no_wsd:
+                only_syn = synsets[0]
+                definition = only_syn.definition() or ""
+                examples = only_syn.examples()
+                raw_lemmas = [l.name().replace("_", " ") for l in only_syn.lemmas()]
+                synonyms = [l for l in raw_lemmas
+                            if l.lower() != lemma.lower() and l.lower() != display_word.lower()][:max_synonyms]
+                antonyms = [l.antonyms()[0].name().replace("_", " ")
+                            for l in only_syn.lemmas() if l.antonyms()][:max_synonyms]
+
+                vi_meanings = await self._get_vi_meanings(
+                    word=display_word,
+                    synset_name=only_syn.name(),
+                    best_substitutes=synonyms[:2],
+                    definition=definition,
+                    sentence_text=sentence_text,
+                    translated_sentence=translated_sentence,
+                )
+
+                # Fallback: direct translation if still empty
+                if not vi_meanings:
+                    vi_meanings = await self._translate_direct(
                         word=display_word,
                         sentence_text=sentence_text,
-                        pos_tag=pos_tag,
-                        is_translated=is_translated,
-                        source_lang=source_lang,
-                        is_phrase=is_phrase,
+                        translated_sentence=translated_sentence,
                     )
+
+                item = VocabItem(
+                    word=display_word,
+                    contextual_meaning=", ".join(vi_meanings[:3]) if vi_meanings else None,
+                    context_sentence=sentence_text,
+                    simple_example=examples[0] if examples else None,
+                    concept_definition=definition or None,
+                    synonyms=synonyms,
+                    antonyms=antonyms,
+                    context_id=f"ctx_wn_{only_syn.name()}",
+                    similarity_score=1.0,
+                    is_translated=is_translated,
+                    source_lang=source_lang,
+                    is_phrase=is_phrase,
+                    is_trusted=True,
+                    wsd_method_scores=None,
                 )
+                self.repo.save_vocab_item(item)
+                vocab_items.append(item)
                 continue
 
             all_tokens_text = t_info["doc_tokens_text"]
@@ -609,7 +679,7 @@ class VocabService:
 
                     span_pos_tag = ""
                     for t in reversed(span_tokens):
-                        if t.pos_ in ("NOUN", "VERB", "ADJ", "ADV"):
+                        if t.pos_ in ("NOUN", "VERB", "ADJ", "ADV", "PROPN"):
                             span_pos_tag = t.pos_
                             break
 
@@ -640,7 +710,7 @@ class VocabService:
                             "lemma": phrase_lemma_underscore,
                             "display_word": phrase_display,
                             "pos": pos_tag,
-                            "tag": "NNP" if pos_tag == "NOUN" else "VB",
+                            "tag": "NNP" if pos_tag in ("NOUN", "PROPN") else "VB",
                             "doc_tokens_text": doc_tokens_text,
                             "is_phrase": True,
                             "synsets": synsets,
@@ -654,7 +724,7 @@ class VocabService:
                 if idx in used_indices:
                     continue
                 if (token.is_alpha and not token.is_stop
-                        and token.pos_ in ("NOUN", "VERB", "ADJ", "ADV")):
+                        and token.pos_ in ("NOUN", "VERB", "ADJ", "ADV", "PROPN")):
                     targets.append({
                         "idx": idx,
                         "span_len": 1,
@@ -861,8 +931,13 @@ class VocabService:
                 result = await asyncio.to_thread(
                     MyMemoryTranslator(source=source, target=target).translate, term)
             else:
-                result = await asyncio.to_thread(
-                    GoogleTranslator(source=source, target=target).translate, term)
+                try:
+                    result = await asyncio.to_thread(
+                        GoogleTranslator(source=source, target=target).translate, term)
+                except Exception as g_err:
+                    logger.debug(f"[google] translate '{term}' error: {g_err}, trying mymemory fallback")
+                    result = await asyncio.to_thread(
+                        MyMemoryTranslator(source="en-US", target="vi-VN").translate, term)
 
             if not result:
                 return []
@@ -875,6 +950,54 @@ class VocabService:
         except Exception as e:
             logger.debug(f"[{engine}] translate '{term}': {e}")
             return []
+
+    async def _translate_direct(
+        self,
+        word: str,
+        sentence_text: str,
+        translated_sentence: str = "",
+    ) -> List[str]:
+        """Directly translate a word/phrase using Gemini AI or Google/MyMemory fallback."""
+        gemini_vi = await self._translate_with_gemini(word, sentence_text, definition="")
+        if gemini_vi:
+            if translated_sentence:
+                return self._verify_against_translation(gemini_vi, translated_sentence)
+            return gemini_vi
+
+        candidates: List[str] = await self._translate_term(word, "en", "vi")
+        if not candidates:
+            candidates = await self._translate_term(word, "en-US", "vi-VN", engine="mymemory")
+
+        if candidates and translated_sentence:
+            return self._verify_against_translation(candidates, translated_sentence)
+
+        return candidates[:3]
+
+    def _build_direct_item(
+        self,
+        word: str,
+        sentence_text: str,
+        vi_meanings: List[str],
+        is_translated: bool = False,
+        source_lang: Optional[str] = None,
+        is_phrase: bool = False,
+    ) -> VocabItem:
+        return VocabItem(
+            word=word,
+            contextual_meaning=", ".join(vi_meanings[:3]) if vi_meanings else None,
+            context_sentence=sentence_text,
+            simple_example=None,
+            concept_definition=None,
+            synonyms=[],
+            antonyms=[],
+            context_id=None,
+            similarity_score=1.0,
+            is_translated=is_translated,
+            source_lang=source_lang,
+            is_phrase=is_phrase,
+            is_trusted=True,
+            wsd_method_scores=None,
+        )
 
     def _build_fallback_item(
         self,

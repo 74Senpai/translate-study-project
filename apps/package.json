@@ -1,0 +1,18 @@
+{
+  "name": "apps-build-orchestrator",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "npm run build:frontend && npm run build:admin && npm run merge",
+    "build:frontend": "cd frontend && npm install && npm run build",
+    "build:admin": "cd admin-panel && npm install && npm run build",
+    "merge": "rimraf frontend/dist/admin && mkdirp frontend/dist/admin && shx cp -r admin-panel/dist/* frontend/dist/admin/",
+    "dev:frontend": "cd frontend && npm run dev",
+    "dev:admin": "cd admin-panel && npm run dev"
+  },
+  "devDependencies": {
+    "rimraf": "^5.0.0",
+    "mkdirp": "^3.0.0",
+    "shx": "^0.3.4"
+  }
+}
