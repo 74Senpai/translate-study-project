@@ -47,7 +47,7 @@
     </mxGraphModel>
   </diagram>
   <diagram id="EVf7BQ0uymtg8OrneXUz" name="so-do-lop">
-    <mxGraphModel dx="2324" dy="783" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
+    <mxGraphModel dx="2264" dy="727" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
@@ -72,7 +72,7 @@
         <mxCell id="LbVObhCF-hFXzec8RdZt-9" parent="1" style="swimlane;childLayout=stackLayout;horizontal=1;startSize=50;horizontalStack=0;rounded=1;fontSize=14;fontStyle=0;strokeWidth=2;resizeParent=0;resizeLast=1;shadow=0;dashed=0;align=center;arcSize=4;whiteSpace=wrap;html=1;" value="word_meaning" vertex="1">
           <mxGeometry height="190" width="160" x="630" y="240" as="geometry" />
         </mxCell>
-        <mxCell id="LbVObhCF-hFXzec8RdZt-10" parent="LbVObhCF-hFXzec8RdZt-9" style="align=left;strokeColor=none;fillColor=none;spacingLeft=4;spacingRight=4;fontSize=12;verticalAlign=top;resizable=0;rotatable=0;part=1;html=1;whiteSpace=wrap;" value="sense&lt;div&gt;meaning&lt;/div&gt;&lt;div&gt;context&lt;/div&gt;&lt;div&gt;define&lt;/div&gt;&lt;div&gt;example&lt;/div&gt;&lt;div&gt;POS&lt;/div&gt;&lt;div&gt;IPA&lt;/div&gt;&lt;div&gt;synonyms&lt;/div&gt;&lt;div&gt;antonyms&lt;/div&gt;" vertex="1">
+        <mxCell id="LbVObhCF-hFXzec8RdZt-10" parent="LbVObhCF-hFXzec8RdZt-9" style="align=left;strokeColor=none;fillColor=none;spacingLeft=4;spacingRight=4;fontSize=12;verticalAlign=top;resizable=0;rotatable=0;part=1;html=1;whiteSpace=wrap;" value="sense_id&lt;div&gt;meaning&lt;/div&gt;&lt;div&gt;context&lt;/div&gt;&lt;div&gt;define&lt;/div&gt;&lt;div&gt;example&lt;/div&gt;&lt;div&gt;POS&lt;/div&gt;&lt;div&gt;IPA&lt;/div&gt;&lt;div&gt;synonyms&lt;/div&gt;&lt;div&gt;antonyms&lt;/div&gt;" vertex="1">
           <mxGeometry height="140" width="160" y="50" as="geometry" />
         </mxCell>
         <mxCell id="O4AAJIfd04IGcYX1vnU9-1" edge="1" parent="1" source="LbVObhCF-hFXzec8RdZt-1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.25;exitDx=0;exitDy=0;entryX=0.01;entryY=0.132;entryDx=0;entryDy=0;entryPerimeter=0;endArrow=none;endFill=0;" target="LbVObhCF-hFXzec8RdZt-7">
@@ -104,6 +104,15 @@
         </mxCell>
         <mxCell id="U1UXEw6f_qkQsiSc_Njy-8" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="1-1" vertex="1">
           <mxGeometry height="30" width="60" x="810" y="260" as="geometry" />
+        </mxCell>
+        <mxCell id="ZIAIP8pOdbF4UdU4Eerz-5" parent="1" style="swimlane;childLayout=stackLayout;horizontal=1;startSize=50;horizontalStack=0;rounded=1;fontSize=14;fontStyle=0;strokeWidth=2;resizeParent=0;resizeLast=1;shadow=0;dashed=0;align=center;arcSize=4;whiteSpace=wrap;html=1;" value="senses" vertex="1">
+          <mxGeometry height="210" width="160" x="360" y="430" as="geometry" />
+        </mxCell>
+        <mxCell id="ZIAIP8pOdbF4UdU4Eerz-6" parent="ZIAIP8pOdbF4UdU4Eerz-5" style="align=left;strokeColor=none;fillColor=none;spacingLeft=4;spacingRight=4;fontSize=12;verticalAlign=top;resizable=0;rotatable=0;part=1;html=1;whiteSpace=wrap;" value="id&lt;div&gt;meaniing&lt;/div&gt;&lt;div&gt;match_count&lt;/div&gt;&lt;div&gt;confiden&lt;/div&gt;&lt;div&gt;trusted&lt;/div&gt;&lt;div&gt;rate&lt;/div&gt;&lt;div&gt;define&lt;/div&gt;&lt;div&gt;example&lt;/div&gt;&lt;div&gt;&lt;div&gt;synonyms&lt;/div&gt;&lt;div&gt;antonyms&lt;/div&gt;&lt;/div&gt;" vertex="1">
+          <mxGeometry height="160" width="160" y="50" as="geometry" />
+        </mxCell>
+        <mxCell id="ZIAIP8pOdbF4UdU4Eerz-7" edge="1" parent="1" source="ZIAIP8pOdbF4UdU4Eerz-5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.25;exitDx=0;exitDy=0;entryX=0;entryY=0.071;entryDx=0;entryDy=0;entryPerimeter=0;endArrow=none;endFill=0;" target="LbVObhCF-hFXzec8RdZt-10">
+          <mxGeometry relative="1" x="0.0014" as="geometry" />
         </mxCell>
       </root>
     </mxGraphModel>
