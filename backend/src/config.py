@@ -1,5 +1,5 @@
 from functools import lru_cache
-from typing import List, Union
+from typing import List, Optional, Union
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import field_validator
 
@@ -42,6 +42,20 @@ class Settings(BaseSettings):
     ai_daily_limit: int = 500
 
     translation_cache_ttl_days: int = 30
+
+    # Supabase
+    supabase_url: str = ""
+    supabase_anon_key: str = ""
+    supabase_service_key: str = ""
+
+    # Google OAuth
+    WEB_CLIENT_ID: str = ""
+
+    # Cookie settings
+    cookie_secure: bool = True
+    cookie_samesite: str = "lax"
+    cookie_max_age: int = 2592000  # 30 days
+    cookie_domain: Optional[str] = None
 
     model_config = SettingsConfigDict(
         env_file=".env",

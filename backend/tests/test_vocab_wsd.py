@@ -1,9 +1,11 @@
 import pytest
 import asyncio
+from types import SimpleNamespace
 from unittest.mock import patch
 from src.config import get_settings
 from src.translate.services.embedding_service import EmbeddingService
 from src.translate.services.vocab_service import VocabService
+from src.translate.models.vocab_model import VocabItem
 
 
 @pytest.fixture
@@ -99,6 +101,44 @@ async def test_generated_example_scoring(vocab_service):
         context_window_vec=context_vec,
     )
     assert 0.0 <= gen_ex_score <= 1.0
+
+
+@pytest.mark.asyncio
+async def test_contextual_meanings_are_translated_as_a_batch(vocab_service):
+    class FakeModels:
+        def __init__(self):
+            self.calls = []
+
+        async def generate_content(self, **kwargs):
+            self.calls.append(kwargs)
+            return SimpleNamespace(text=(
+                '{"translations": ['
+                '{"id": 1, "meanings": ["nhánh"]},'
+                '{"id": 0, "meanings": ["ngân hàng"]}'
+                ']}'
+            ))
+
+    models = FakeModels()
+    vocab_service.gemini_model = "test-model"
+    vocab_service.gemini_client = SimpleNamespace(
+        aio=SimpleNamespace(models=models)
+    )
+    bank = VocabItem(word="bank", context_sentence="The bank opened.")
+    branch = VocabItem(word="branch", context_sentence="The bank opened.")
+
+    await vocab_service._populate_contextual_meanings(
+        meaning_requests=[
+            (bank, "bank", "a financial institution"),
+            (branch, "branch", "a division of a larger organization"),
+        ],
+        sentence_text="The bank opened a new branch.",
+        translated_sentence=None,
+    )
+
+    assert len(models.calls) == 1
+    assert "'id': 0" in models.calls[0]["contents"]
+    assert bank.contextual_meaning == "ngân hàng"
+    assert branch.contextual_meaning == "nhánh"
 
 
 def test_generate_matching_length_example(vocab_service):

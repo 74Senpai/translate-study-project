@@ -18,7 +18,7 @@ Pipeline Architecture (5-Method Weighted WSD):
   5. Composite Reranking & Sense Selection:
      - Rank senses by composite score with POS match bonus.
   6. Vietnamese Meaning Assignment & Translation:
-     - Translate target word in context via Gemini AI Model (or online fallback) verified with translated sentence.
+     - Batch-translate selected word meanings in context via Gemini, then verify with the translated sentence.
 """
 
 from typing import List, Optional, Dict, Tuple
@@ -33,11 +33,21 @@ from deep_translator import GoogleTranslator, MyMemoryTranslator
 from google import genai
 from google.genai import types as genai_types
 import asyncio
+from pydantic import BaseModel
 
 from src.config import get_settings
 from src.translate.models.vocab_model import VocabItem, VocabAnalysisResponse
 from src.translate.repositories.vocab_repository import VocabRepository
 from src.translate.services.embedding_service import EmbeddingService
+
+
+class BatchMeaningItem(BaseModel):
+    id: int
+    meanings: List[str]
+
+
+class BatchMeaningResponse(BaseModel):
+    translations: List[BatchMeaningItem]
 
 
 class VocabService:
@@ -127,6 +137,7 @@ class VocabService:
             w5 = w_gen_ex / total_weight
 
         vocab_items: List[VocabItem] = []
+        meaning_requests: List[Tuple[VocabItem, str, str]] = []
         pos_map = {"NOUN": "n", "VERB": "v", "ADJ": "a", "ADV": "r", "PROPN": "n"}
         stopwords = {"a", "an", "the", "of", "or", "and", "in", "on", "at", "by", "for",
                      "with", "to", "from", "as", "used", "is", "are", "be", "form", "combining"}
@@ -146,21 +157,15 @@ class VocabService:
 
             # ── Case: no synsets at all → translate directly ───────────────────
             if not synsets:
-                vi_meanings = await self._translate_direct(
-                    word=display_word,
-                    sentence_text=sentence_text,
-                    translated_sentence=translated_sentence,
-                )
                 item = self._build_direct_item(
                     word=display_word,
                     sentence_text=sentence_text,
-                    vi_meanings=vi_meanings,
                     is_translated=is_translated,
                     source_lang=source_lang,
                     is_phrase=is_phrase,
                 )
-                self.repo.save_vocab_item(item)
                 vocab_items.append(item)
+                meaning_requests.append((item, display_word, ""))
                 continue
 
             # ── Case: only 1 sense OR 1 sense with no synonyms → translate directly ──
@@ -189,26 +194,9 @@ class VocabService:
                 antonyms = [l.antonyms()[0].name().replace("_", " ")
                             for l in only_syn.lemmas() if l.antonyms()][:max_synonyms]
 
-                vi_meanings = await self._get_vi_meanings(
-                    word=display_word,
-                    synset_name=only_syn.name(),
-                    best_substitutes=synonyms[:2],
-                    definition=definition,
-                    sentence_text=sentence_text,
-                    translated_sentence=translated_sentence,
-                )
-
-                # Fallback: direct translation if still empty
-                if not vi_meanings:
-                    vi_meanings = await self._translate_direct(
-                        word=display_word,
-                        sentence_text=sentence_text,
-                        translated_sentence=translated_sentence,
-                    )
-
                 item = VocabItem(
                     word=display_word,
-                    contextual_meaning=", ".join(vi_meanings[:3]) if vi_meanings else None,
+                    contextual_meaning=None,
                     context_sentence=sentence_text,
                     simple_example=examples[0] if examples else None,
                     concept_definition=definition or None,
@@ -222,8 +210,8 @@ class VocabService:
                     is_trusted=True,
                     wsd_method_scores=None,
                 )
-                self.repo.save_vocab_item(item)
                 vocab_items.append(item)
+                meaning_requests.append((item, display_word, definition))
                 continue
 
             all_tokens_text = t_info["doc_tokens_text"]
@@ -398,15 +386,6 @@ class VocabService:
             )
             best_subs = [s for s, _ in winning_synonyms[:3]]
 
-            vi_meanings = await self._get_vi_meanings(
-                word=display_word,
-                synset_name=best_synset_name,
-                best_substitutes=best_subs,
-                definition=best_info["definition"],
-                sentence_text=sentence_text,
-                translated_sentence=translated_sentence,
-            )
-
             synonyms = best_info["synonyms"][:max_synonyms]
             antonyms = best_info["antonyms"][:max_synonyms]
             simple_ex = (best_info["examples"][0]
@@ -414,7 +393,7 @@ class VocabService:
 
             item = VocabItem(
                 word=display_word,
-                contextual_meaning=", ".join(vi_meanings[:3]) if vi_meanings else None,
+                contextual_meaning=None,
                 context_sentence=sentence_text,
                 simple_example=simple_ex,
                 concept_definition=best_info.get("definition") or None,
@@ -428,9 +407,16 @@ class VocabService:
                 is_trusted=is_trusted,
                 wsd_method_scores=synset_method_details.get(best_synset_name),
             )
-            self.repo.save_vocab_item(item)
             vocab_items.append(item)
+            meaning_requests.append((item, display_word, best_info["definition"]))
 
+        await self._populate_contextual_meanings(
+            meaning_requests=meaning_requests,
+            sentence_text=sentence_text,
+            translated_sentence=translated_sentence,
+        )
+        for item in vocab_items:
+            self.repo.save_vocab_item(item)
         return VocabAnalysisResponse(sentence=sentence_text, vocabularies=vocab_items)
 
     # ── Context Window & 5-Method Helpers ─────────────────────────────────────
@@ -827,6 +813,87 @@ class VocabService:
 
         return best_name, best_score
 
+    async def _populate_contextual_meanings(
+        self,
+        meaning_requests: List[Tuple[VocabItem, str, str]],
+        sentence_text: str,
+        translated_sentence: Optional[str],
+    ) -> None:
+        if not meaning_requests:
+            return
+
+        grouped_requests: Dict[Tuple[str, str], List[VocabItem]] = {}
+        for item, word, definition in meaning_requests:
+            key = (word.casefold(), definition)
+            grouped_requests.setdefault(key, []).append(item)
+
+        batch = [
+            (items[0], items[0].word, definition)
+            for (_, definition), items in grouped_requests.items()
+        ]
+        translated_by_id: Dict[int, List[str]] = {}
+
+        if self.gemini_client:
+            batch_inputs = [
+                {
+                    "id": index,
+                    "word": word,
+                    "definition": definition,
+                }
+                for index, (_, word, definition) in enumerate(batch)
+            ]
+            prompt = (
+                "Translate each target English word or phrase into 1-3 concise, natural "
+                "Vietnamese meanings using the supplied sentence and definition to select "
+                "the correct sense. Keep each result attached to its input ID. "
+                "Return only the requested structured data.\n\n"
+                f"Sentence: {sentence_text}\n"
+                f"Items: {batch_inputs}"
+            )
+            try:
+                response = await self.gemini_client.aio.models.generate_content(
+                    model=self.gemini_model,
+                    contents=prompt,
+                    config=genai_types.GenerateContentConfig(
+                        temperature=0.1,
+                        response_mime_type="application/json",
+                        response_schema=BatchMeaningResponse,
+                    ),
+                )
+                if response and response.text:
+                    parsed = BatchMeaningResponse.model_validate_json(response.text)
+                    translated_by_id = {
+                        entry.id: [meaning.strip() for meaning in entry.meanings if meaning.strip()][:3]
+                        for entry in parsed.translations
+                        if 0 <= entry.id < len(batch)
+                    }
+            except Exception as e:
+                logger.warning(f"Batch vocabulary meaning translation failed: {e}")
+
+        for index, (item, word, definition) in enumerate(batch):
+            meanings = translated_by_id.get(index, [])
+            if not meanings and item.context_id:
+                meanings = await self._get_vi_meanings(
+                    word=word,
+                    synset_name=item.context_id.removeprefix("ctx_wn_"),
+                    best_substitutes=item.synonyms[:2],
+                    definition=definition,
+                    sentence_text=sentence_text,
+                    use_gemini=False,
+                )
+            elif not meanings:
+                meanings = await self._translate_term(word, "en", "vi")
+                if not meanings:
+                    meanings = await self._translate_term(
+                        word, "en-US", "vi-VN", engine="mymemory"
+                    )
+
+            if meanings and translated_sentence:
+                meanings = self._verify_against_translation(meanings, translated_sentence)
+            contextual_meaning = ", ".join(meanings[:3]) if meanings else None
+            for grouped_item in grouped_requests[(word.casefold(), definition)]:
+                grouped_item.contextual_meaning = contextual_meaning
+
     async def _get_vi_meanings(
         self,
         word: str,
@@ -835,6 +902,7 @@ class VocabService:
         definition: str,
         sentence_text: str,
         translated_sentence: Optional[str] = None,
+        use_gemini: bool = True,
     ) -> List[str]:
         """
         Build Vietnamese meanings in priority order:
@@ -843,7 +911,10 @@ class VocabService:
         P3 (verify)   → promote meanings appearing in translated_sentence
         """
         # P1: Gemini AI Contextual Translation
-        gemini_vi = await self._translate_with_gemini(word, sentence_text, definition)
+        gemini_vi = (
+            await self._translate_with_gemini(word, sentence_text, definition)
+            if use_gemini else []
+        )
         if gemini_vi:
             if translated_sentence:
                 return self._verify_against_translation(gemini_vi, translated_sentence)
@@ -951,40 +1022,17 @@ class VocabService:
             logger.debug(f"[{engine}] translate '{term}': {e}")
             return []
 
-    async def _translate_direct(
-        self,
-        word: str,
-        sentence_text: str,
-        translated_sentence: str = "",
-    ) -> List[str]:
-        """Directly translate a word/phrase using Gemini AI or Google/MyMemory fallback."""
-        gemini_vi = await self._translate_with_gemini(word, sentence_text, definition="")
-        if gemini_vi:
-            if translated_sentence:
-                return self._verify_against_translation(gemini_vi, translated_sentence)
-            return gemini_vi
-
-        candidates: List[str] = await self._translate_term(word, "en", "vi")
-        if not candidates:
-            candidates = await self._translate_term(word, "en-US", "vi-VN", engine="mymemory")
-
-        if candidates and translated_sentence:
-            return self._verify_against_translation(candidates, translated_sentence)
-
-        return candidates[:3]
-
     def _build_direct_item(
         self,
         word: str,
         sentence_text: str,
-        vi_meanings: List[str],
         is_translated: bool = False,
         source_lang: Optional[str] = None,
         is_phrase: bool = False,
     ) -> VocabItem:
         return VocabItem(
             word=word,
-            contextual_meaning=", ".join(vi_meanings[:3]) if vi_meanings else None,
+            contextual_meaning=None,
             context_sentence=sentence_text,
             simple_example=None,
             concept_definition=None,
