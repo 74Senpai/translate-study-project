@@ -4,6 +4,8 @@
 
 ```mermaid
 erDiagram
+    WORDS ||--o{ SENSES : "1 từ có nhiều senses (1:N)"
+    
     USERS ||--o{ USER_WORDS : "sở hữu (1:N)"
     USERS ||--|| USER_STATISTICS : "thống kê tổng thể (1:1)"
     USERS ||--o{ USER_WORD_STATISTICS : "thống kê gặp/dịch từ (1:N)"
@@ -14,6 +16,16 @@ erDiagram
     SENSES ||--o{ WORD_MEANINGS : "bổ trợ tra cứu/cache (1:N)"
     
     WORD_MEANINGS ||--|| FLASHCARD_STATISTICS : "tạo và liên kết flashcard (1:1)"
+
+    WORDS {
+        uuid id PK "Khóa chính"
+        varchar word UK "Từ vựng gốc (lowercase)"
+        varchar lemma "Dạng nguyên thể (lemma)"
+        varchar pos "Từ loại (POS: noun, verb...)"
+        varchar ipa "Phiên âm quốc tế IPA"
+        timestamptz created_at "Thời điểm tạo"
+        timestamptz updated_at "Thời điểm cập nhật"
+    }
 
     USERS {
         uuid id PK "Khóa chính (Supabase auth.users.id)"
@@ -83,6 +95,8 @@ erDiagram
 
     SENSES {
         varchar id PK "Mã sense (vd: ctx_wn_bank.n.01)"
+        uuid word_id FK "Khóa ngoại 1-N tới words(id)"
+        varchar word "Từ vựng tương ứng"
         text meaning "Nghĩa tiếng Việt chuẩn"
         int match_count "Số lần khớp sense này"
         numeric confidence "Độ tin cậy WSD (0.0 - 1.0)"

@@ -60,11 +60,15 @@ class TranslateWorkflow:
         )
 
     def simple_translate(self, req: TranslateRequest):
+        if req.option and "engine" in req.option:
+            self.translator.engine_manager.select_engine_by_name(req.option["engine"])
         clean_text = _input.validate_and_normalize(req.text)
         chunks = _input.get_inputs(text=clean_text, service=self.translator.__class__.__name__)
         return self.translator.translate(req.source, chunks)
 
     async def translate(self, req: TranslateRequest) -> AsyncGenerator[TranslateWorkflowResponse, None]:
+        if req.option and "engine" in req.option:
+            self.translator.engine_manager.select_engine_by_name(req.option["engine"])
         # 1. Validation & Normalization
         clean_text = _input.validate_and_normalize(req.text)
         req.text = clean_text
@@ -112,7 +116,8 @@ class TranslateWorkflow:
             self.stats.update_statistics(
                 text=translated_text,
                 source_engine=engine_name,
-                is_translated=True
+                is_translated=True,
+                user_id=req.user_id,
             ),
             type_resp=TypeResponse.STATS
         )
@@ -131,7 +136,8 @@ class TranslateWorkflow:
                     sentence_text=eng_s.sentence_text,
                     translated_sentence=vi_context,
                     is_translated=True,
-                    source_lang="vi"
+                    source_lang="vi",
+                    user_id=req.user_id,
                 ),
                 type_resp=TypeResponse.VOCAB
             )
@@ -162,7 +168,8 @@ class TranslateWorkflow:
                 self.stats.update_statistics(
                     text=req.text,
                     source_engine=engine_name,
-                    is_translated=False
+                    is_translated=False,
+                    user_id=req.user_id,
                 ),
                 type_resp=TypeResponse.STATS
             )
@@ -183,7 +190,11 @@ class TranslateWorkflow:
             # Task 4d: Vocabulary & Semantics Extraction in Context
             for s in sentences:
                 self._add_event(
-                    self.vocab.extract_and_save_vocab(sentence_text=s.sentence_text, is_translated=False),
+                    self.vocab.extract_and_save_vocab(
+                        sentence_text=s.sentence_text,
+                        is_translated=False,
+                        user_id=req.user_id,
+                    ),
                     type_resp=TypeResponse.VOCAB
                 )
 

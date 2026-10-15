@@ -11,12 +11,15 @@ class VocabItem(BaseModel):
     synonyms: List[str] = []
     antonyms: List[str] = []
     context_id: Optional[str] = None
+    sense_id: Optional[str] = None
     similarity_score: float = 0.0
     is_translated: bool = False
     source_lang: Optional[str] = None
     is_phrase: bool = False
     is_trusted: bool = False
     wsd_method_scores: Optional[dict] = None
+    pos: Optional[str] = None
+    ipa: Optional[str] = None
 
 
 class VocabAnalysisResponse(BaseModel):

@@ -14,7 +14,7 @@ class DeepGoogleTranslate(TranslateEngine):
         self.name_engine = "Deep Google Translate"
         self.max_input_len = 4500
         self.rate_limit = None
-        self.available = True
+        self.available = False
 
     def stats(self):
         return {

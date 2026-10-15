@@ -14,7 +14,7 @@ class Googletrans(TranslateEngine):
         self.name_engine = "Google Translate"
         self.max_input_len = 500
         self.rate_limit = None
-        self.available = True
+        self.available = False
 
     def stats(self):
         return {

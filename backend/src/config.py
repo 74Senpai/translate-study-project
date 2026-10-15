@@ -1,4 +1,5 @@
 from functools import lru_cache
+from pathlib import Path
 from typing import List, Optional, Union
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import field_validator
@@ -41,6 +42,10 @@ class Settings(BaseSettings):
     gemini_model: str = "gemini-2.0-flash"
     ai_daily_limit: int = 500
 
+    envit5_enable: bool = True
+    envit5_model_name: str = "VietAI/envit5-translation"
+    envit5_max_length: int = 512
+
     translation_cache_ttl_days: int = 30
 
     # Supabase
@@ -58,7 +63,7 @@ class Settings(BaseSettings):
     cookie_domain: Optional[str] = None
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=(str(Path(__file__).resolve().parent.parent / ".env"), ".env", "backend/.env"),
         env_file_encoding="utf-8",
         extra="ignore",
     )

@@ -12,6 +12,7 @@ class TranslateRequest(BaseModel):
     source: TranslateMode
     text: str
     option: Optional[dict] = None
+    user_id: Optional[str] = None
 
 
 class SimpleTranslateResponse(BaseModel):

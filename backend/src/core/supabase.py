@@ -1,4 +1,4 @@
-from backend.src.core.supabase import create_client, Client, ClientOptions
+from supabase import create_client, Client, ClientOptions
 from loguru import logger
 from src.config import get_settings
 

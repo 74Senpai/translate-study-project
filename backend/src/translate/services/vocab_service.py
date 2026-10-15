@@ -102,6 +102,7 @@ class VocabService:
         translated_sentence: Optional[str] = None,
         is_translated: bool = False,
         source_lang: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> VocabAnalysisResponse:
         """
         Analyse content target words using 5-Method Weighted WSD with trust mechanism.
@@ -163,6 +164,7 @@ class VocabService:
                     is_translated=is_translated,
                     source_lang=source_lang,
                     is_phrase=is_phrase,
+                    pos=pos_tag,
                 )
                 vocab_items.append(item)
                 meaning_requests.append((item, display_word, ""))
@@ -209,6 +211,7 @@ class VocabService:
                     is_phrase=is_phrase,
                     is_trusted=True,
                     wsd_method_scores=None,
+                    pos=pos_tag,
                 )
                 vocab_items.append(item)
                 meaning_requests.append((item, display_word, definition))
@@ -406,6 +409,7 @@ class VocabService:
                 is_phrase=is_phrase,
                 is_trusted=is_trusted,
                 wsd_method_scores=synset_method_details.get(best_synset_name),
+                pos=pos_tag,
             )
             vocab_items.append(item)
             meaning_requests.append((item, display_word, best_info["definition"]))
@@ -416,7 +420,7 @@ class VocabService:
             translated_sentence=translated_sentence,
         )
         for item in vocab_items:
-            self.repo.save_vocab_item(item)
+            self.repo.save_vocab_item(item, user_id=user_id)
         return VocabAnalysisResponse(sentence=sentence_text, vocabularies=vocab_items)
 
     # ── Context Window & 5-Method Helpers ─────────────────────────────────────
@@ -1029,6 +1033,7 @@ class VocabService:
         is_translated: bool = False,
         source_lang: Optional[str] = None,
         is_phrase: bool = False,
+        pos: Optional[str] = None,
     ) -> VocabItem:
         return VocabItem(
             word=word,
@@ -1045,6 +1050,7 @@ class VocabService:
             is_phrase=is_phrase,
             is_trusted=True,
             wsd_method_scores=None,
+            pos=pos,
         )
 
     def _build_fallback_item(
@@ -1071,6 +1077,7 @@ class VocabService:
             is_phrase=is_phrase,
             is_trusted=False,
             wsd_method_scores=None,
+            pos=pos_tag,
         )
 
     def _get_synsets(self, word_input, pos_tag: str = ""):

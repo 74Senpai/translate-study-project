@@ -20,7 +20,8 @@ class StatsService:
         self,
         text: str,
         source_engine: str = "default",
-        is_translated: bool = False
+        is_translated: bool = False,
+        user_id: Optional[str] = None,
     ) -> WordStatsResponse:
         """Extract words from text, update word count & frequency statistics across time periods."""
         words_to_count: List[str] = []
@@ -59,15 +60,20 @@ class StatsService:
             stat_item = self.repo.update_word_occurrence(
                 word=word,
                 source_engine=source_engine,
-                is_translated=is_translated
+                is_translated=is_translated,
+                user_id=user_id,
             )
             updated_items.append(stat_item)
+
+        meta = {
+            "source_engine": source_engine,
+            "is_translated": is_translated,
+        }
+        if user_id:
+            meta["user_id"] = user_id
 
         return WordStatsResponse(
             processed_words_count=len(words_to_count),
             word_stats=updated_items,
-            metadata={
-                "source_engine": source_engine,
-                "is_translated": is_translated
-            }
+            metadata=meta,
         )

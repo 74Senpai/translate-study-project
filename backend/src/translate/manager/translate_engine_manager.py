@@ -43,6 +43,27 @@ class TranslateEngineManager:
         self.current_engine = None
         return False
 
+    def select_engine_by_name(self, engine_name: str) -> bool:
+        """Select a specific engine by name (e.g. 'envit5', 'gemini', 'google')."""
+        if not engine_name:
+            return False
+        target = engine_name.lower().strip()
+        for engine in self.engines:
+            name = getattr(engine, "name_engine", "").lower()
+            if target in name or any(part in name for part in target.split()):
+                if not engine.is_available():
+                    continue
+                try:
+                    engine.start_engine()
+                    engine.is_use = True
+                    self.current_engine = engine
+                    logger.info(f"Explicitly selected engine: {engine.name_engine}")
+                    return True
+                except Exception as e:
+                    logger.error(f"Failed to start requested engine {engine.name_engine}: {e}")
+                    continue
+        return False
+
     def list_all_engine(self):
         return self.engines
 

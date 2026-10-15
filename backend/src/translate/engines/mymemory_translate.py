@@ -32,7 +32,7 @@ class MyMemoryEngine(TranslateEngine):
         self.name_engine = "MyMemory Translate"
         self.max_input_len = 500   # MyMemory hard limit per request
         self.rate_limit = None
-        self.available = True
+        self.available = False
 
     def stats(self):
         return {

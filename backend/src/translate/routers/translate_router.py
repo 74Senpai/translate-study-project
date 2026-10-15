@@ -11,6 +11,7 @@ from src.translate.services.analys_service import AnalysService
 from src.translate.services.stats_service import StatsService
 from src.translate.services.vocab_service import VocabService
 
+from src.middleware.auth import get_optional_current_user
 from src.translate.models.translate_model import TranslateRequest, SimpleTranslateResponse
 from src.translate.models.translate_workflow_model import TranslateWorkflowResponse
 from src.translate.workflows.translate_wokrflow import TranslateWorkflow
@@ -88,8 +89,12 @@ def get_translate_workflow(
 async def translate_simple(
     request: Request,
     data: TranslateRequest,
+    current_user: dict | None = Depends(get_optional_current_user),
     workflow: TranslateWorkflow = Depends(get_translate_workflow),
 ):
+    if current_user and not data.user_id:
+        data.user_id = current_user.get("sub")
+
     async def stream():
         async for item in workflow.simple_translate(data):
             yield item.model_dump_json() + "\n"
@@ -106,8 +111,12 @@ async def translate_simple(
 async def translate_stream(
     request: Request,
     data: TranslateRequest,
+    current_user: dict | None = Depends(get_optional_current_user),
     workflow: TranslateWorkflow = Depends(get_translate_workflow),
 ):
+    if current_user and not data.user_id:
+        data.user_id = current_user.get("sub")
+
     async def stream():
         async for item in workflow.translate(data):
             yield item.model_dump_json() + "\n"
@@ -125,8 +134,12 @@ async def translate_stream(
 async def translate_json(
     request: Request,
     data: TranslateRequest,
+    current_user: dict | None = Depends(get_optional_current_user),
     workflow: TranslateWorkflow = Depends(get_translate_workflow),
 ) -> List[TranslateWorkflowResponse]:
+    if current_user and not data.user_id:
+        data.user_id = current_user.get("sub")
+
     results: List[TranslateWorkflowResponse] = []
     async for item in workflow.translate(data):
         results.append(item)
