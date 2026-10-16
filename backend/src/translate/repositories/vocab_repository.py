@@ -18,7 +18,9 @@ class VocabRepository:
         self._store: Dict[str, VocabItem] = {}
 
     def save_vocab_item(self, item: VocabItem, user_id: Optional[str] = None) -> VocabItem:
-        key = f"{item.word.lower().strip()}_{item.context_id}"
+        # Capture stable WordNet sense_id BEFORE it can be overwritten by DB UUID after save
+        stable_sense_id = item.sense_id or item.context_id
+        key = f"{item.word.lower().strip()}_{stable_sense_id}"
         self._store[key] = item
 
         try:
@@ -26,6 +28,8 @@ class VocabRepository:
             if res and isinstance(res, dict):
                 saved_sense = res.get("sense")
                 if saved_sense and isinstance(saved_sense, dict) and saved_sense.get("id"):
+                    # Update item.sense_id to reflect the persisted DB ID,
+                    # but the in-memory cache key stays stable (WordNet ID)
                     item.sense_id = str(saved_sense["id"])
         except Exception as e:
             logger.error(f"Failed to persist vocab item '{item.word}' to Supabase: {e}")

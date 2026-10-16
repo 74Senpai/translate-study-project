@@ -39,21 +39,19 @@ def _format_auth_response(session, metadata, roles, refresh_token=None):
     )
 
 
-def _build_user(auth_res):
-    username = auth_res.user.user_metadata.get(
-        "preferred_username") or auth_res.user.email.split("@")[0]
-    display_name = auth_res.user.user_metadata.get(
-        "full_name") or auth_res.user.user_metadata.get("name") or username
-    name = auth_res.user.user_metadata.get("name")
-    user_id = auth_res.user.id
-    avatar_url = auth_res.user.user_metadata.get("avatar_url")
-
-    return UserAuth(
-        id=user_id,
-        name=name,
-        username=username,
+def _upsert_profile(repo: AuthRepo, user_id: str, email: str, metadata: dict):
+    if not email:
+        raise ValueError("Authenticated user is missing an email address.")
+    display_name = (
+        metadata.get("full_name")
+        or metadata.get("name")
+        or email.split("@", 1)[0]
+    )
+    repo.upsert_profile(
+        user_id=user_id,
+        email=email,
         display_name=display_name,
-        avatar_url=avatar_url
+        avatar_url=metadata.get("avatar_url"),
     )
 
 
@@ -75,12 +73,16 @@ class AuthService():
             if not auth_res.session:
                 raise HTTPException(
                     status_code=401, detail="Invalid credentials")
-            user = _build_user(auth_res=auth_res)
-            self.repo.upsert_user(user.model_dump(mode="json"))
+            _upsert_profile(
+                self.repo,
+                auth_res.user.id,
+                auth_res.user.email,
+                auth_res.user.user_metadata or {},
+            )
 
             _set_refresh_cookie(response, auth_res.session.refresh_token)
 
-            roles = get_user_roles(user.id)
+            roles = get_user_roles(auth_res.user.id)
 
             return _format_auth_response(
                 auth_res.session,
@@ -100,6 +102,12 @@ class AuthService():
                 raise HTTPException(
                     status_code=401, detail="Invalid refresh token")
 
+            _upsert_profile(
+                self.repo,
+                res.user.id,
+                res.user.email,
+                res.user.user_metadata or {},
+            )
             _set_refresh_cookie(response, res.session.refresh_token)
             roles = get_user_roles(res.user.id)
             return _format_auth_response(res.session, res.user.user_metadata, roles)
@@ -111,19 +119,19 @@ class AuthService():
     def user_auth(self, user):
         user_id = user.get("sub")
         email = user.get("email")
-        metadata = user.get("user_metadata", {})
+        metadata = user.get("user_metadata") or {}
 
         roles = get_user_roles(user_id)
 
-        self.repo.upsert_user({
-            "id": user_id,
-            "display_name": metadata.get("full_name") or email.split("@")[0],
-            "avatar_url": metadata.get("avatar_url")
-        })
+        _upsert_profile(self.repo, user_id, email, metadata)
 
         return {
             "id": user_id,
-            "display_name": metadata.get("full_name") or email.split("@")[0],
+            "display_name": (
+                metadata.get("full_name")
+                or metadata.get("name")
+                or email.split("@", 1)[0]
+            ),
             "avatar_url": metadata.get("avatar_url"),
             "roles": roles,
             "is_admin": "ADMIN" in roles,

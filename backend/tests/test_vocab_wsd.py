@@ -105,24 +105,26 @@ async def test_generated_example_scoring(vocab_service):
 
 @pytest.mark.asyncio
 async def test_contextual_meanings_are_translated_as_a_batch(vocab_service):
-    class FakeModels:
+    class FakeEngineManager:
         def __init__(self):
-            self.calls = []
+            self.batch_calls = []
+            self.single_calls = []
 
-        async def generate_content(self, **kwargs):
-            self.calls.append(kwargs)
-            return SimpleNamespace(text=(
-                '{"translations": ['
-                '{"id": 1, "meanings": ["nhánh"]},'
-                '{"id": 0, "meanings": ["ngân hàng"]}'
-                ']}'
-            ))
+        async def translate_batch(self, source, texts, target_lang=None):
+            self.batch_calls.append({"source": source, "texts": texts})
+            mapping = {
+                "bank": "ngân hàng",
+                "branch": "nhánh",
+            }
+            return [mapping.get(t, t) for t in texts]
 
-    models = FakeModels()
-    vocab_service.gemini_model = "test-model"
-    vocab_service.gemini_client = SimpleNamespace(
-        aio=SimpleNamespace(models=models)
-    )
+        async def translate(self, source, text, target_lang=None):
+            self.single_calls.append({"source": source, "text": text})
+            return text
+
+    manager = FakeEngineManager()
+    vocab_service.engine_manager = manager
+
     bank = VocabItem(word="bank", context_sentence="The bank opened.")
     branch = VocabItem(word="branch", context_sentence="The bank opened.")
 
@@ -135,8 +137,9 @@ async def test_contextual_meanings_are_translated_as_a_batch(vocab_service):
         translated_sentence=None,
     )
 
-    assert len(models.calls) == 1
-    assert "'id': 0" in models.calls[0]["contents"]
+    assert len(manager.batch_calls) == 1
+    assert "bank" in manager.batch_calls[0]["texts"]
+    assert "branch" in manager.batch_calls[0]["texts"]
     assert bank.contextual_meaning == "ngân hàng"
     assert branch.contextual_meaning == "nhánh"
 
@@ -170,6 +173,8 @@ async def test_5method_wsd_vocab_extraction(vocab_service):
     assert bank_vocab is not None
     assert bank_vocab.context_id is not None
     assert bank_vocab.context_id.startswith("ctx_wn_")
+    assert bank_vocab.sense_id is not None
+    assert bank_vocab.sense_id.startswith("bank.")
     assert bank_vocab.similarity_score > 0.0
 
     # Verify WSD method scores are populated

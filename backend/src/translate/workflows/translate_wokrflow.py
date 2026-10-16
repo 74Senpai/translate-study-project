@@ -41,7 +41,7 @@ class TranslateWorkflow:
         self.analysis = analysis
         self.typo = typo
         self.stats = stats or StatsService()
-        self.vocab = vocab or VocabService()
+        self.vocab = vocab or VocabService(engine_manager=translator.engine_manager)
 
         self._event_count = 0
         self._queue = asyncio.Queue()

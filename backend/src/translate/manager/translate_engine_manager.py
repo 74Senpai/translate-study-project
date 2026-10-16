@@ -1,4 +1,4 @@
-from typing import Any, Optional
+from typing import Any, Optional, Union
 from src.translate.engines import ENGINES
 from loguru import logger
 from datetime import datetime, timedelta
@@ -80,7 +80,29 @@ class TranslateEngineManager:
             return self.current_engine.stats()
         return None
 
-    async def translate(self, source: TranslateMode, text: str) -> str:
+    def _normalize_mode(
+        self,
+        source: Union[TranslateMode, str],
+        target_lang: Optional[str] = None
+    ) -> TranslateMode:
+        if isinstance(source, TranslateMode):
+            return source
+        src = "en" if "en" in str(source).lower() else ("vi" if "vi" in str(source).lower() else str(source))
+        tgt = target_lang or ("vi" if src == "en" else "en")
+        tgt = "en" if "en" in str(tgt).lower() else ("vi" if "vi" in str(tgt).lower() else str(tgt))
+        return TranslateMode(source_lang=src, target_lang=tgt)
+
+    async def translate(
+        self,
+        source: Union[TranslateMode, str],
+        text: str,
+        target_lang: Optional[str] = None,
+    ) -> str:
+        if not text or not text.strip():
+            return ""
+
+        mode = self._normalize_mode(source, target_lang)
+
         if not self.current_engine:
             self.switch_available_engine()
 
@@ -95,7 +117,7 @@ class TranslateEngineManager:
             tried.add(engine_name)
             try:
                 res = await self.current_engine.translate(
-                    source.source_lang, source.target_lang, text)
+                    mode.source_lang, mode.target_lang, text)
 
                 if res and res.strip():
                     self.current_engine.set_infor(last_success_time=datetime.now())
@@ -117,28 +139,48 @@ class TranslateEngineManager:
         logger.error("All translation engines failed. Returning original text.")
         return text
 
-    async def translate_batch(self, source: TranslateMode, texts: list[str]) -> list[str]:
+    async def translate_batch(
+        self,
+        source: Union[TranslateMode, str],
+        texts: list[str],
+        target_lang: Optional[str] = None,
+    ) -> list[str]:
         if not texts:
             return []
+
+        mode = self._normalize_mode(source, target_lang)
 
         if not self.current_engine:
             self.switch_available_engine()
 
-        if self.current_engine and hasattr(self.current_engine, "translate_batch"):
-            try:
-                res = await self.current_engine.translate_batch(
-                    source.source_lang, source.target_lang, texts
-                )
-                if res and len(res) == len(texts):
-                    self.current_engine.set_infor(last_success_time=datetime.now())
-                    return res
-            except Exception as e:
-                logger.error(f"Batch translation failed on engine {getattr(self.current_engine, 'name_engine', 'Unknown')}: {e}")
+        tried = set()
+        while self.current_engine:
+            engine_name = getattr(self.current_engine, "name_engine", "Unknown")
+            if engine_name in tried:
+                break
+            tried.add(engine_name)
 
-        # Fallback to single text translation loop
+            if hasattr(self.current_engine, "translate_batch"):
+                try:
+                    res = await self.current_engine.translate_batch(
+                        mode.source_lang, mode.target_lang, texts
+                    )
+                    if res and len(res) == len(texts):
+                        self.current_engine.set_infor(last_success_time=datetime.now())
+                        return res
+                    else:
+                        logger.warning(f"Engine {engine_name} returned empty or invalid batch.")
+                        self._mark_failed_and_switch(engine_name, cooldown_minutes=30)
+                except Exception as e:
+                    logger.error(f"Batch translation failed on engine {engine_name}: {e}")
+                    self._mark_failed_and_switch(engine_name, cooldown_minutes=30)
+            else:
+                break
+
+        # Fallback to single text translation loop using translate()
         results = []
         for text in texts:
-            r = await self.translate(source, text)
+            r = await self.translate(mode, text)
             results.append(r)
         return results
 

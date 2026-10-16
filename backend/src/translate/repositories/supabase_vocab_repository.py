@@ -29,6 +29,13 @@ def _to_uuid_str(val: Optional[str], fallback_seed: str = "") -> str:
     return str(uuid.uuid5(uuid.NAMESPACE_DNS, seed))
 
 
+def _clean_sense_id(val: Optional[str], fallback_seed: str = "") -> str:
+    """Return clean sense ID string (preserving WordNet sense ID like 'bank.n.01')."""
+    if val and str(val).strip():
+        return str(val).strip()
+    return fallback_seed or str(uuid.uuid4())
+
+
 class SupabaseVocabRepository:
     """
     Repository tương tác với Supabase PostgreSQL theo đúng chuẩn backend/database/schema.sql:
@@ -120,8 +127,8 @@ class SupabaseVocabRepository:
     # ── SENSES (Kho tri thức nghĩa & cache WSD) ──────────────────────────────
 
     def get_sense(self, sense_id: str) -> Optional[Dict[str, Any]]:
-        """Lấy thông tin sense theo id (UUID)."""
-        clean_id = _to_uuid_str(sense_id)
+        """Lấy thông tin sense theo id."""
+        clean_id = _clean_sense_id(sense_id)
         try:
             res = self.client.table("senses").select("*").eq("id", clean_id).maybe_single().execute()
             return res.data
@@ -145,15 +152,16 @@ class SupabaseVocabRepository:
         - Cập nhật confidence_score và is_trusted nếu cao hơn
         """
         try:
-            sense_uuid = _to_uuid_str(sense.id, f"{sense.word_id}_{sense.meaning_vi}")
+            sense_id = _clean_sense_id(sense.id, f"{sense.word_id}_{sense.meaning_vi}")
             
-            # 1. Kiểm tra sense đã tồn tại theo id hoặc (word_id, meaning_vi)
+            # 1. Kiểm tra sense đã tồn tại theo id (WordNet sense ID) hoặc (word_id, meaning_vi)
             existing = None
-            try:
-                res_id = self.client.table("senses").select("*").eq("id", sense_uuid).maybe_single().execute()
-                existing = res_id.data if res_id else None
-            except Exception:
-                pass
+            if sense_id:
+                try:
+                    res_id = self.client.table("senses").select("*").eq("id", sense_id).maybe_single().execute()
+                    existing = res_id.data if res_id else None
+                except Exception:
+                    pass
 
             if not existing and sense.word_id:
                 try:
@@ -197,7 +205,7 @@ class SupabaseVocabRepository:
 
             # Tạo mới sense
             payload = {
-                "id": sense_uuid,
+                "id": sense_id,
                 "word_id": sense.word_id,
                 "meaning_vi": sense.meaning_vi.strip(),
                 "definition_en": sense.definition_en,
@@ -264,7 +272,7 @@ class SupabaseVocabRepository:
 
     def record_user_sense_progress(self, user_id: str, sense_id: str) -> Optional[Dict[str, Any]]:
         """Ghi nhận số lần dịch / cập nhật tiến độ học sense của user."""
-        clean_sense_id = _to_uuid_str(sense_id)
+        clean_sense_id = _clean_sense_id(sense_id)
         try:
             existing = (
                 self.client.table("user_sense_progress")
@@ -314,7 +322,7 @@ class SupabaseVocabRepository:
         """Lưu câu ngữ cảnh hoặc ghi chú riêng của user cho một sense."""
         if not context and not meaning_note:
             return None
-        clean_sense_id = _to_uuid_str(sense_id)
+        clean_sense_id = _clean_sense_id(sense_id)
         try:
             existing = (
                 self.client.table("user_sense_notes")
@@ -354,7 +362,7 @@ class SupabaseVocabRepository:
 
     def ensure_user_sense_stats(self, user_id: str, sense_id: str) -> Optional[Dict[str, Any]]:
         """Đảm bảo tồn tại bản ghi user_sense_stats cho cặp (user_id, sense_id)."""
-        clean_sense_id = _to_uuid_str(sense_id)
+        clean_sense_id = _clean_sense_id(sense_id)
         try:
             existing = (
                 self.client.table("user_sense_stats")
@@ -389,7 +397,7 @@ class SupabaseVocabRepository:
         repetition_loop_id: Optional[int] = None,
     ) -> Optional[Dict[str, Any]]:
         """Cập nhật kết quả làm bài ôn tập flashcard cho user."""
-        clean_sense_id = _to_uuid_str(sense_id)
+        clean_sense_id = _clean_sense_id(sense_id)
         norm_type = "choose" if exercise_type in ("chose", "choose") else exercise_type
         try:
             # 1. Cập nhật thống kê chi tiết theo loại bài tập (user_sense_stats)
@@ -507,7 +515,7 @@ class SupabaseVocabRepository:
         if norm_type not in valid_activities:
             norm_type = "translate"
 
-        clean_sense_id = _to_uuid_str(sense_id)
+        clean_sense_id = _clean_sense_id(sense_id)
         try:
             payload = {
                 "user_id": user_id,
@@ -550,14 +558,22 @@ class SupabaseVocabRepository:
             if word_id and raw_surface.lower() != raw_surface:
                 self.add_word_form(word_id=word_id, form_text=raw_surface, form_type="surface")
 
-            # 2. Xác định UUID cho sense
+            # 2. Xác định ID cho sense: sử dụng id của sense từ wordnet ra để tránh trùng lặp
             meaning_text = (item.contextual_meaning or item.concept_definition or clean_word).strip()
-            sense_uuid = _to_uuid_str(item.context_id, f"{word_id}_{meaning_text}")
-            item.sense_id = sense_uuid
+
+            wordnet_sense_id = item.sense_id
+            if not wordnet_sense_id and item.context_id:
+                if item.context_id.startswith("ctx_wn_"):
+                    wordnet_sense_id = item.context_id.removeprefix("ctx_wn_")
+                else:
+                    wordnet_sense_id = item.context_id
+
+            sense_id = _clean_sense_id(wordnet_sense_id, f"{word_id}_{clean_word}")
+            item.sense_id = sense_id
 
             # 3. Lưu hoặc cập nhật sense vào bảng senses (không ràng buộc user)
             sense_model = SenseModel(
-                id=sense_uuid,
+                id=sense_id,
                 word_id=word_id,
                 meaning_vi=meaning_text[:255],
                 definition_en=item.concept_definition,
@@ -571,7 +587,7 @@ class SupabaseVocabRepository:
                 rating_score=4.5 if item.is_trusted else 0.0,
             )
             saved_sense = self.upsert_sense(sense_model)
-            actual_sense_id = (saved_sense["id"] if saved_sense else None) or sense_uuid
+            actual_sense_id = (saved_sense["id"] if saved_sense else None) or sense_id
 
             # ─────────────────────────────────────────────────────────────────
             # NẾU USER CHƯA ĐĂNG NHẬP (user_id is None): DỪNG LẠI TẠI ĐÂY!

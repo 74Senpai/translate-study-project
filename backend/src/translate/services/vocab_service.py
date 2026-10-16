@@ -18,7 +18,7 @@ Pipeline Architecture (5-Method Weighted WSD):
   5. Composite Reranking & Sense Selection:
      - Rank senses by composite score with POS match bonus.
   6. Vietnamese Meaning Assignment & Translation:
-     - Batch-translate selected word meanings in context via Gemini, then verify with the translated sentence.
+     - Batch-translate or individually translate word meanings via translation engine manager, then verify with the translated sentence.
 """
 
 from typing import List, Optional, Dict, Tuple
@@ -29,25 +29,22 @@ from loguru import logger
 import nltk
 from nltk.corpus import wordnet as wn
 from nltk.wsd import lesk
-from deep_translator import GoogleTranslator, MyMemoryTranslator
-from google import genai
-from google.genai import types as genai_types
 import asyncio
-from pydantic import BaseModel
 
 from src.config import get_settings
+from src.translate.manager.translate_engine_manager import TranslateEngineManager
+from src.translate.models.translate_model import TranslateMode
 from src.translate.models.vocab_model import VocabItem, VocabAnalysisResponse
 from src.translate.repositories.vocab_repository import VocabRepository
 from src.translate.services.embedding_service import EmbeddingService
 
-
-class BatchMeaningItem(BaseModel):
-    id: int
-    meanings: List[str]
-
-
-class BatchMeaningResponse(BaseModel):
-    translations: List[BatchMeaningItem]
+LOCATION_NER_LABELS = {"GPE", "LOC", "FAC"}
+KEEP_ORIGINAL_NER_LABELS = {
+    "PERSON", "ORG", "PRODUCT", "EVENT", "WORK_OF_ART", "LAW", "LANGUAGE", "NORP"
+}
+SKIP_NER_LABELS = {
+    "DATE", "TIME", "PERCENT", "MONEY", "QUANTITY", "ORDINAL", "CARDINAL"
+}
 
 
 class VocabService:
@@ -67,9 +64,11 @@ class VocabService:
         repo: Optional[VocabRepository] = None,
         embedding_service: Optional[EmbeddingService] = None,
         spacy_model: str = "en_core_web_sm",
+        engine_manager: Optional[TranslateEngineManager] = None,
     ):
         self.repo = repo or VocabRepository()
         self.embedding_service = embedding_service or EmbeddingService(spacy_model=spacy_model)
+        self.engine_manager = engine_manager or TranslateEngineManager()
         self.nlp = None
         try:
             self.nlp = spacy.load(spacy_model)
@@ -82,16 +81,53 @@ class VocabService:
             except Exception as e:
                 logger.warning(f"NLTK download {pkg}: {e}")
 
-        # Gemini Client for in-context vocabulary translation
-        self.gemini_client = None
-        settings = get_settings()
-        if settings.gemini_api_key:
-            try:
-                self.gemini_client = genai.Client(api_key=settings.gemini_api_key)
-                self.gemini_model = settings.gemini_model
-                logger.info(f"VocabService initialized Gemini Client with model '{self.gemini_model}'.")
-            except Exception as e:
-                logger.warning(f"VocabService could not init Gemini Client: {e}")
+    @staticmethod
+    def _extract_synonyms_from_synset(
+        synset,
+        excluded_words: List[str],
+        max_synonyms: int = 5,
+    ) -> List[str]:
+        """
+        Extract synonyms strictly from WordNet synset lemmas / lemma_names().
+        Excludes lemmas matching any word in excluded_words (case-insensitive, normalized).
+        """
+        excluded_normalized = {
+            w.lower().replace("_", " ") for w in excluded_words if w
+        }
+        synonyms: List[str] = []
+        seen = set()
+        for lemma in synset.lemmas():
+            name_clean = lemma.name().replace("_", " ")
+            name_lower = name_clean.lower()
+            if name_lower not in excluded_normalized and name_lower not in seen:
+                seen.add(name_lower)
+                synonyms.append(name_clean)
+                if len(synonyms) >= max_synonyms:
+                    break
+        return synonyms
+
+    @staticmethod
+    def _extract_antonyms_from_synset(
+        synset,
+        max_antonyms: int = 5,
+    ) -> List[str]:
+        """
+        Extract antonyms strictly from WordNet synset lemmas' antonyms.
+        """
+        antonyms: List[str] = []
+        seen = set()
+        for lemma in synset.lemmas():
+            for ant in lemma.antonyms():
+                ant_clean = ant.name().replace("_", " ")
+                ant_lower = ant_clean.lower()
+                if ant_lower not in seen:
+                    seen.add(ant_lower)
+                    antonyms.append(ant_clean)
+                    if len(antonyms) >= max_antonyms:
+                        break
+            if len(antonyms) >= max_antonyms:
+                break
+        return antonyms
 
     # ── Public API ─────────────────────────────────────────────────────────────
 
@@ -138,8 +174,8 @@ class VocabService:
             w5 = w_gen_ex / total_weight
 
         vocab_items: List[VocabItem] = []
-        meaning_requests: List[Tuple[VocabItem, str, str]] = []
-        pos_map = {"NOUN": "n", "VERB": "v", "ADJ": "a", "ADV": "r", "PROPN": "n"}
+        meaning_requests: List[Tuple[VocabItem, str, str, str]] = []
+        pos_map = {"NOUN": "n", "VERB": "v", "ADJ": "a", "ADV": "r"}
         stopwords = {"a", "an", "the", "of", "or", "and", "in", "on", "at", "by", "for",
                      "with", "to", "from", "as", "used", "is", "are", "be", "form", "combining"}
 
@@ -151,8 +187,62 @@ class VocabService:
             display_word = t_info.get("display_word", surface)
             pos_tag   = t_info["pos"]
             tag       = t_info["tag"]
+            morph     = t_info.get("morph", "")   # SpaCy morphology string e.g. "VerbForm=Part|Tense=Pres"
             is_phrase = t_info.get("is_phrase", False)
             wn_pos    = pos_map.get(pos_tag, None)
+
+            is_proper_noun = t_info.get("is_proper_noun", False) or pos_tag == "PROPN"
+            is_location = t_info.get("is_location", False)
+            is_keep_original = t_info.get("is_keep_original", False)
+
+            # ── Case: Tên riêng giữ nguyên (PERSON, ORG, PROPN, ...) ────────
+            if is_proper_noun and is_keep_original:
+                ner_type = t_info.get("ner_label") or "PROPN"
+                item = VocabItem(
+                    word=display_word,
+                    contextual_meaning=display_word,  # Tên riêng giữ nguyên
+                    context_sentence=sentence_text,
+                    simple_example=None,
+                    concept_definition=f"Tên riêng ({ner_type})",
+                    synonyms=[],
+                    antonyms=[],
+                    context_id=None,
+                    sense_id=None,
+                    similarity_score=1.0,
+                    is_translated=is_translated,
+                    source_lang=source_lang,
+                    is_phrase=is_phrase,
+                    is_trusted=True,
+                    wsd_method_scores=None,
+                    pos="PROPN",
+                )
+                vocab_items.append(item)
+                continue
+
+            # ── Case: Địa danh (GPE, LOC, FAC) → Dịch trực tiếp ──────────────
+            if is_proper_noun and is_location:
+                ner_type = t_info.get("ner_label") or "LOC"
+                item = VocabItem(
+                    word=display_word,
+                    contextual_meaning=None,
+                    context_sentence=sentence_text,
+                    simple_example=None,
+                    concept_definition=f"Địa danh ({ner_type})",
+                    synonyms=[],
+                    antonyms=[],
+                    context_id=None,
+                    sense_id=None,
+                    similarity_score=1.0,
+                    is_translated=is_translated,
+                    source_lang=source_lang,
+                    is_phrase=is_phrase,
+                    is_trusted=True,
+                    wsd_method_scores=None,
+                    pos="PROPN",
+                )
+                vocab_items.append(item)
+                meaning_requests.append((item, display_word, "", display_word))
+                continue
 
             synsets = t_info.get("synsets") or self._get_synsets(lemma, pos_tag)
 
@@ -167,7 +257,9 @@ class VocabService:
                     pos=pos_tag,
                 )
                 vocab_items.append(item)
-                meaning_requests.append((item, display_word, ""))
+                # For translation: use SpaCy lemma (base form) for single words, display_word for phrases
+                translate_form_direct = lemma if not is_phrase else display_word
+                meaning_requests.append((item, display_word, "", translate_form_direct))
                 continue
 
             # ── Case: only 1 sense OR 1 sense with no synonyms → translate directly ──
@@ -178,9 +270,9 @@ class VocabService:
                 # Check if all senses combined have no usable synonyms
                 all_synonyms = []
                 for syn in synsets:
-                    raw_lemmas = [l.name().replace("_", " ") for l in syn.lemmas()]
-                    syn_lemmas = [l for l in raw_lemmas
-                                  if l.lower() != lemma.lower() and l.lower() != display_word.lower()]
+                    syn_lemmas = self._extract_synonyms_from_synset(
+                        syn, [lemma, display_word, surface], max_synonyms
+                    )
                     all_synonyms.extend(syn_lemmas)
                 # Only treat as "no synonyms" when exactly 1 synset has no external synonyms
                 if len(synsets) == 1 and not all_synonyms:
@@ -190,11 +282,12 @@ class VocabService:
                 only_syn = synsets[0]
                 definition = only_syn.definition() or ""
                 examples = only_syn.examples()
-                raw_lemmas = [l.name().replace("_", " ") for l in only_syn.lemmas()]
-                synonyms = [l for l in raw_lemmas
-                            if l.lower() != lemma.lower() and l.lower() != display_word.lower()][:max_synonyms]
-                antonyms = [l.antonyms()[0].name().replace("_", " ")
-                            for l in only_syn.lemmas() if l.antonyms()][:max_synonyms]
+                synonyms = self._extract_synonyms_from_synset(
+                    only_syn, [lemma, display_word, surface], max_synonyms
+                )
+                antonyms = self._extract_antonyms_from_synset(
+                    only_syn, max_synonyms
+                )
 
                 item = VocabItem(
                     word=display_word,
@@ -205,6 +298,7 @@ class VocabService:
                     synonyms=synonyms,
                     antonyms=antonyms,
                     context_id=f"ctx_wn_{only_syn.name()}",
+                    sense_id=only_syn.name(),
                     similarity_score=1.0,
                     is_translated=is_translated,
                     source_lang=source_lang,
@@ -214,7 +308,9 @@ class VocabService:
                     pos=pos_tag,
                 )
                 vocab_items.append(item)
-                meaning_requests.append((item, display_word, definition))
+                # For translation: use SpaCy lemma (base form) for single words, display_word for phrases
+                translate_form_single = lemma if not is_phrase else display_word
+                meaning_requests.append((item, display_word, definition, translate_form_single))
                 continue
 
             all_tokens_text = t_info["doc_tokens_text"]
@@ -237,21 +333,12 @@ class VocabService:
 
             for syn in synsets:
                 syn_name = syn.name()
-                raw_lemmas = [l.name().replace("_", " ") for l in syn.lemmas()]
-                syn_lemmas = [l for l in raw_lemmas if l.lower() != lemma.lower() and l.lower() != display_word.lower()]
-                antonyms   = [l.antonyms()[0].name().replace("_", " ")
-                              for l in syn.lemmas() if l.antonyms()]
-
-                # Fallback to definition keywords if synset has no external synonyms
-                if not syn_lemmas and syn.definition():
-                    def_words = [
-                        w.lower() for w in re.findall(r'\b[a-zA-Z]{3,}\b', syn.definition())
-                        if w.lower() not in stopwords and w.lower() != lemma.lower() and w.lower() != display_word.lower()
-                    ]
-                    syn_lemmas = def_words[:4]
-
-                # Max synonyms per sense rule (configurable via wsd_max_synonyms)
-                syn_lemmas = syn_lemmas[:max_synonyms]
+                syn_lemmas = self._extract_synonyms_from_synset(
+                    syn, [lemma, display_word, surface], max_synonyms
+                )
+                antonyms = self._extract_antonyms_from_synset(
+                    syn, max_synonyms
+                )
 
                 synset_info[syn_name] = {
                     "synset": syn,
@@ -261,6 +348,7 @@ class VocabService:
                     "synonyms": syn_lemmas,
                     "antonyms": antonyms,
                     "context_id": f"ctx_wn_{syn_name}",
+                    "sense_id": syn_name,
                 }
 
                 # ── M3: WordNet Lesk score (dual: trimmed context + full sentence) ──
@@ -289,7 +377,15 @@ class VocabService:
 
                 # Collect variants for M1 (sentence) and M2 (context window)
                 for s_lemma in syn_lemmas:
-                    inflected = self._inflect_word(s_lemma, tag)
+                    # Inflect synonym to match the grammatical form of the original word.
+                    # Uses the full morphology chain: Penn tag → morph features → SpaCy inflect → fallback.
+                    inflected = self._inflect_synonym_to_match(
+                        syn_lemma=s_lemma,
+                        surface=surface,
+                        tag=tag,
+                        morph=morph,
+                        pos_tag=pos_tag,
+                    )
 
                     # M1 variant: full sentence with synonym substitution
                     var_sent_words = (
@@ -403,6 +499,7 @@ class VocabService:
                 synonyms=synonyms,
                 antonyms=antonyms,
                 context_id=best_info["context_id"],
+                sense_id=best_synset_name,
                 similarity_score=round(best_score, 4),
                 is_translated=is_translated,
                 source_lang=source_lang,
@@ -412,7 +509,9 @@ class VocabService:
                 pos=pos_tag,
             )
             vocab_items.append(item)
-            meaning_requests.append((item, display_word, best_info["definition"]))
+            # For translation: use SpaCy lemma (base form) for single words, display_word for phrases
+            translate_form_wsd = lemma if not is_phrase else display_word
+            meaning_requests.append((item, display_word, best_info["definition"], translate_form_wsd))
 
         await self._populate_contextual_meanings(
             meaning_requests=meaning_requests,
@@ -640,7 +739,59 @@ class VocabService:
             n_tokens = len(doc)
             used_indices = set()
 
-            # 1. Multi-word Phrase Scanning (n = 4 down to 2)
+            # 1. Named Entity Recognition (NER) handling
+            for ent in doc.ents:
+                if not ent.text.strip():
+                    continue
+
+                # Skip temporal/numerical entities from vocab analysis
+                if ent.label_ in SKIP_NER_LABELS:
+                    for idx in range(ent.start, ent.end):
+                        used_indices.add(idx)
+                    continue
+
+                if ent.label_ in LOCATION_NER_LABELS:
+                    # Địa danh -> Dịch trực tiếp
+                    targets.append({
+                        "idx": ent.start,
+                        "span_len": len(ent),
+                        "surface": ent.text,
+                        "lemma": ent.text,
+                        "display_word": ent.text,
+                        "pos": "PROPN",
+                        "tag": "NNP",
+                        "doc_tokens_text": doc_tokens_text,
+                        "is_phrase": len(ent) > 1,
+                        "is_proper_noun": True,
+                        "is_location": True,
+                        "is_keep_original": False,
+                        "ner_label": ent.label_,
+                        "synsets": [],
+                    })
+                    for idx in range(ent.start, ent.end):
+                        used_indices.add(idx)
+                else:
+                    # Tên riêng (PERSON, ORG, PRODUCT, ...) -> Giữ nguyên
+                    targets.append({
+                        "idx": ent.start,
+                        "span_len": len(ent),
+                        "surface": ent.text,
+                        "lemma": ent.text,
+                        "display_word": ent.text,
+                        "pos": "PROPN",
+                        "tag": "NNP",
+                        "doc_tokens_text": doc_tokens_text,
+                        "is_phrase": len(ent) > 1,
+                        "is_proper_noun": True,
+                        "is_location": False,
+                        "is_keep_original": True,
+                        "ner_label": ent.label_,
+                        "synsets": [],
+                    })
+                    for idx in range(ent.start, ent.end):
+                        used_indices.add(idx)
+
+            # 2. Multi-word Phrase Scanning (n = 4 down to 2) on unconsumed tokens
             for n in range(4, 1, -1):
                 for i in range(n_tokens - n + 1):
                     if any(idx in used_indices for idx in range(i, i + n)):
@@ -669,7 +820,7 @@ class VocabService:
 
                     span_pos_tag = ""
                     for t in reversed(span_tokens):
-                        if t.pos_ in ("NOUN", "VERB", "ADJ", "ADV", "PROPN"):
+                        if t.pos_ in ("NOUN", "VERB", "ADJ", "ADV"):
                             span_pos_tag = t.pos_
                             break
 
@@ -703,18 +854,43 @@ class VocabService:
                             "tag": "NNP" if pos_tag in ("NOUN", "PROPN") else "VB",
                             "doc_tokens_text": doc_tokens_text,
                             "is_phrase": True,
+                            "is_proper_noun": False,
+                            "is_location": False,
+                            "is_keep_original": False,
                             "synsets": synsets,
                         })
 
                         for idx in range(i, i + n):
                             used_indices.add(idx)
 
-            # 2. Single word target extraction for unconsumed tokens
+            # 3. Single word target extraction for unconsumed tokens
             for idx, token in enumerate(doc):
                 if idx in used_indices:
                     continue
-                if (token.is_alpha and not token.is_stop
-                        and token.pos_ in ("NOUN", "VERB", "ADJ", "ADV", "PROPN")):
+                if not token.is_alpha or token.is_stop:
+                    continue
+
+                if token.pos_ == "PROPN":
+                    # Standalone proper noun (not caught by NER entities) -> Tên riêng giữ nguyên
+                    targets.append({
+                        "idx": idx,
+                        "span_len": 1,
+                        "surface": token.text,
+                        "lemma": token.text,
+                        "display_word": token.text,
+                        "pos": "PROPN",
+                        "tag": token.tag_,
+                        "morph": str(token.morph),
+                        "doc_tokens_text": doc_tokens_text,
+                        "is_phrase": False,
+                        "is_proper_noun": True,
+                        "is_location": False,
+                        "is_keep_original": True,
+                        "ner_label": "PROPN",
+                        "synsets": [],
+                    })
+                    used_indices.add(idx)
+                elif token.pos_ in ("NOUN", "VERB", "ADJ", "ADV"):
                     targets.append({
                         "idx": idx,
                         "span_len": 1,
@@ -723,8 +899,12 @@ class VocabService:
                         "display_word": token.lemma_.lower(),
                         "pos": token.pos_,
                         "tag": token.tag_,
+                        "morph": str(token.morph),
                         "doc_tokens_text": doc_tokens_text,
                         "is_phrase": False,
+                        "is_proper_noun": False,
+                        "is_location": False,
+                        "is_keep_original": False,
                     })
 
             targets.sort(key=lambda x: x["idx"])
@@ -782,7 +962,7 @@ class VocabService:
             return targets
 
     def _inflect_word(self, lemma: str, tag: str) -> str:
-        """Inflect lemma into surface form matching grammatical tag."""
+        """Simple inflect lemma to surface form matching Penn Treebank tag. Used as fallback."""
         try:
             infl = lemminflect.getInflection(lemma, tag=tag)
             if infl and len(infl) > 0:
@@ -790,6 +970,131 @@ class VocabService:
         except Exception as e:
             logger.debug(f"Inflection failed for '{lemma}' ({tag}): {e}")
         return lemma
+
+    def _inflect_synonym_to_match(
+        self,
+        syn_lemma: str,
+        surface: str,
+        tag: str,
+        morph: str,
+        pos_tag: str,
+    ) -> str:
+        """
+        Inflect a synonym lemma to match the grammatical form of the original word in the sentence.
+
+        Pipeline (in order of precision):
+        1. Use Penn Treebank tag (tag) with lemminflect.getInflection — most direct mapping.
+        2. Use SpaCy morphology features (morph string) to derive the correct inflection.
+        3. Try SpaCy's own token._.inflect() if available.
+        4. Fall back to the original syn_lemma if no inflection possible.
+
+        Examples:
+          "running" (VBG, VerbForm=Part|Tense=Pres) → "sprint" → "sprinting"
+          "banks" (NNS, Number=Plur)                → "institution" → "institutions"
+          "went" (VBD, Tense=Past)                   → "travel" → "traveled"
+          "happiest" (JJS, Degree=Sup)               → "joyful" → "most joyful" (or "joyfulest")
+        """
+        if not syn_lemma or not syn_lemma.strip():
+            return syn_lemma
+
+        # Multi-word synonyms (e.g. from definition fallback): inflect only the first content word
+        if " " in syn_lemma:
+            parts = syn_lemma.split()
+            first_inflected = self._inflect_synonym_to_match(
+                parts[0], surface, tag, morph, pos_tag
+            )
+            return first_inflected + " " + " ".join(parts[1:])
+
+        # ── Step 1: Penn Treebank tag → lemminflect (most reliable for English) ──
+        if tag:
+            try:
+                infl = lemminflect.getInflection(syn_lemma, tag=tag)
+                if infl and infl[0].lower() != syn_lemma.lower():
+                    logger.debug(f"Inflected '{syn_lemma}' → '{infl[0]}' via tag={tag}")
+                    return infl[0]
+                elif infl:
+                    # Even if same string, it's still the correct form
+                    return infl[0]
+            except Exception as e:
+                logger.debug(f"lemminflect tag inflect failed for '{syn_lemma}' ({tag}): {e}")
+
+        # ── Step 2: Parse SpaCy morphology features and apply manually ────────
+        if morph:
+            try:
+                morph_dict: Dict[str, str] = {}
+                for feat in morph.split("|"):
+                    if "=" in feat:
+                        k, v = feat.split("=", 1)
+                        morph_dict[k.strip()] = v.strip()
+
+                verb_form = morph_dict.get("VerbForm", "")
+                tense     = morph_dict.get("Tense", "")
+                number    = morph_dict.get("Number", "")
+                degree    = morph_dict.get("Degree", "")
+
+                # Map morph features → Penn tag for lemminflect
+                derived_tag = None
+                if pos_tag == "VERB":
+                    if verb_form == "Part" and tense in ("Pres", ""):
+                        derived_tag = "VBG"   # running, sprinting
+                    elif verb_form == "Part" and tense == "Past":
+                        derived_tag = "VBN"   # run, sprinted
+                    elif verb_form == "Fin" and tense == "Past":
+                        derived_tag = "VBD"   # went, traveled
+                    elif verb_form == "Fin" and tense == "Pres" and number == "Sing":
+                        derived_tag = "VBZ"   # runs, travels
+                    elif verb_form == "Fin" and tense == "Pres":
+                        derived_tag = "VBP"   # run, travel
+                    elif verb_form == "Inf":
+                        derived_tag = "VB"    # run, travel (base)
+                    elif verb_form == "Ger":
+                        derived_tag = "VBG"   # running
+                elif pos_tag in ("NOUN", "PROPN"):
+                    derived_tag = "NNS" if number == "Plur" else "NN"
+                elif pos_tag == "ADJ":
+                    if degree == "Cmp":
+                        derived_tag = "JJR"   # bigger, more joyful
+                    elif degree == "Sup":
+                        derived_tag = "JJS"   # biggest, most joyful
+                    else:
+                        derived_tag = "JJ"
+                elif pos_tag == "ADV":
+                    if degree == "Cmp":
+                        derived_tag = "RBR"
+                    elif degree == "Sup":
+                        derived_tag = "RBS"
+                    else:
+                        derived_tag = "RB"
+
+                if derived_tag and derived_tag != tag:
+                    try:
+                        infl = lemminflect.getInflection(syn_lemma, tag=derived_tag)
+                        if infl:
+                            logger.debug(
+                                f"Inflected '{syn_lemma}' → '{infl[0]}' via morph={morph} "
+                                f"derived_tag={derived_tag}"
+                            )
+                            return infl[0]
+                    except Exception:
+                        pass
+            except Exception as e:
+                logger.debug(f"Morph parse failed for '{syn_lemma}' morph='{morph}': {e}")
+
+        # ── Step 3: SpaCy token._.inflect() via lemminflect extension ──────────
+        if self.nlp is not None and tag:
+            try:
+                doc = self.nlp(syn_lemma)
+                if doc and len(doc) > 0:
+                    inflected = doc[0]._.inflect(tag)
+                    if inflected and inflected.lower() != syn_lemma.lower():
+                        logger.debug(f"SpaCy inflect '{syn_lemma}' → '{inflected}' via tag={tag}")
+                        return inflected
+            except Exception as e:
+                logger.debug(f"SpaCy token._.inflect failed for '{syn_lemma}': {e}")
+
+        # ── Step 4: Fallback — return the original lemma unchanged ─────────────
+        logger.debug(f"No inflection found for '{syn_lemma}' (tag={tag}, morph={morph}), keeping lemma.")
+        return syn_lemma
 
     def _rerank_senses(
         self,
@@ -817,17 +1122,81 @@ class VocabService:
 
         return best_name, best_score
 
+    async def _translate_terms_batch(
+        self,
+        terms: List[str],
+        source_lang: str = "en",
+        target_lang: str = "vi",
+    ) -> List[List[str]]:
+        """Batch-translate multiple terms via manager and return clean tokens per term."""
+        if not terms:
+            return []
+        try:
+            results = await self.engine_manager.translate_batch(
+                source=source_lang,
+                texts=terms,
+                target_lang=target_lang,
+            )
+            parsed: List[List[str]] = []
+            for term, res in zip(terms, results):
+                if not res:
+                    parsed.append([])
+                    continue
+                clean = res
+                if "(NOTICE:" in clean:
+                    clean = clean[:clean.index("(NOTICE:")].strip()
+                if clean.strip().lower() == term.lower():
+                    parsed.append([])
+                    continue
+                tokens = [m.strip().lower() for m in clean.split(",") if m.strip()]
+                parsed.append(tokens)
+            return parsed
+        except Exception as e:
+            logger.debug(f"Manager translate_batch failed: {e}")
+            return [[] for _ in terms]
+
+    async def _translate_term(
+        self,
+        term: str,
+        source_lang: str = "en",
+        target_lang: str = "vi",
+    ) -> List[str]:
+        """Translate a single term via manager and return clean tokens."""
+        if not term or not term.strip():
+            return []
+        try:
+            result = await self.engine_manager.translate(
+                source=source_lang,
+                text=term,
+                target_lang=target_lang,
+            )
+            if not result:
+                return []
+            if "(NOTICE:" in result:
+                result = result[:result.index("(NOTICE:")].strip()
+            if result.strip().lower() == term.lower():
+                return []
+            return [m.strip().lower() for m in result.split(",") if m.strip()]
+        except Exception as e:
+            logger.debug(f"Manager translate '{term}' failed: {e}")
+            return []
+
     async def _populate_contextual_meanings(
         self,
-        meaning_requests: List[Tuple[VocabItem, str, str]],
+        meaning_requests: List[Tuple[VocabItem, str, str, str]],
         sentence_text: str,
         translated_sentence: Optional[str],
     ) -> None:
+        """
+        Populate contextual Vietnamese meanings for each VocabItem.
+        meaning_requests: List of (item, display_word, definition, translate_form)
+        translate_form is the normalized/lemmatized form of the word used for translation.
+        """
         if not meaning_requests:
             return
 
         grouped_requests: Dict[Tuple[str, str], List[VocabItem]] = {}
-        for item, word, definition in meaning_requests:
+        for item, word, definition, translate_form in meaning_requests:
             key = (word.casefold(), definition)
             grouped_requests.setdefault(key, []).append(item)
 
@@ -835,66 +1204,49 @@ class VocabService:
             (items[0], items[0].word, definition)
             for (_, definition), items in grouped_requests.items()
         ]
-        translated_by_id: Dict[int, List[str]] = {}
 
-        if self.gemini_client:
-            batch_inputs = [
-                {
-                    "id": index,
-                    "word": word,
-                    "definition": definition,
-                }
-                for index, (_, word, definition) in enumerate(batch)
-            ]
-            prompt = (
-                "Translate each target English word or phrase into 1-3 concise, natural "
-                "Vietnamese meanings using the supplied sentence and definition to select "
-                "the correct sense. Keep each result attached to its input ID. "
-                "Return only the requested structured data.\n\n"
-                f"Sentence: {sentence_text}\n"
-                f"Items: {batch_inputs}"
-            )
-            try:
-                response = await self.gemini_client.aio.models.generate_content(
-                    model=self.gemini_model,
-                    contents=prompt,
-                    config=genai_types.GenerateContentConfig(
-                        temperature=0.1,
-                        response_mime_type="application/json",
-                        response_schema=BatchMeaningResponse,
-                    ),
-                )
-                if response and response.text:
-                    parsed = BatchMeaningResponse.model_validate_json(response.text)
-                    translated_by_id = {
-                        entry.id: [meaning.strip() for meaning in entry.meanings if meaning.strip()][:3]
-                        for entry in parsed.translations
-                        if 0 <= entry.id < len(batch)
-                    }
-            except Exception as e:
-                logger.warning(f"Batch vocabulary meaning translation failed: {e}")
+        # Build translate_form lookup: keyed by (word.casefold(), definition)
+        translate_form_lookup: Dict[Tuple[str, str], str] = {}
+        for item, word, definition, translate_form in meaning_requests:
+            key = (word.casefold(), definition)
+            if key not in translate_form_lookup:
+                translate_form_lookup[key] = translate_form
+
+        # 1. Batch translation via manager — use normalized (base lemma) forms for better accuracy
+        batch_translate_words = [
+            translate_form_lookup.get((item.word.casefold(), definition), word)
+            for item, word, definition in batch
+        ]
+        batch_meanings = await self._translate_terms_batch(
+            terms=batch_translate_words,
+            source_lang="en",
+            target_lang="vi",
+        )
 
         for index, (item, word, definition) in enumerate(batch):
-            meanings = translated_by_id.get(index, [])
+            meanings = batch_meanings[index] if index < len(batch_meanings) else []
+            translate_form = translate_form_lookup.get((word.casefold(), definition), word)
+
+            # 2. If no batch meaning or word has synset context, refine via synonym probes
             if not meanings and item.context_id:
                 meanings = await self._get_vi_meanings(
-                    word=word,
+                    word=translate_form,
                     synset_name=item.context_id.removeprefix("ctx_wn_"),
                     best_substitutes=item.synonyms[:2],
                     definition=definition,
                     sentence_text=sentence_text,
-                    use_gemini=False,
+                    pos_tag=item.pos or "",
                 )
             elif not meanings:
-                meanings = await self._translate_term(word, "en", "vi")
-                if not meanings:
-                    meanings = await self._translate_term(
-                        word, "en-US", "vi-VN", engine="mymemory"
-                    )
+                # Fallback to single translation via manager using normalized form
+                meanings = await self._translate_term(translate_form, "en", "vi")
 
             if meanings and translated_sentence:
                 meanings = self._verify_against_translation(meanings, translated_sentence)
+
             contextual_meaning = ", ".join(meanings[:3]) if meanings else None
+            if not contextual_meaning and item.pos == "PROPN":
+                contextual_meaning = word
             for grouped_item in grouped_requests[(word.casefold(), definition)]:
                 grouped_item.contextual_meaning = contextual_meaning
 
@@ -906,42 +1258,34 @@ class VocabService:
         definition: str,
         sentence_text: str,
         translated_sentence: Optional[str] = None,
-        use_gemini: bool = True,
+        pos_tag: str = "",
     ) -> List[str]:
         """
-        Build Vietnamese meanings in priority order:
-        P1 (Gemini)   → translate target word IN CONTEXT using Gemini AI Model
-        P2 (online)   → fallback translate best synonym substitutes via Google / MyMemory
-        P3 (verify)   → promote meanings appearing in translated_sentence
+        Build Vietnamese meanings via manager using synonyms/definition probes.
+        Normalizes synonyms to base lemma form before using as translation probes.
+        Translates candidate probes in batch or individually through manager.
         """
-        # P1: Gemini AI Contextual Translation
-        gemini_vi = (
-            await self._translate_with_gemini(word, sentence_text, definition)
-            if use_gemini else []
-        )
-        if gemini_vi:
-            if translated_sentence:
-                return self._verify_against_translation(gemini_vi, translated_sentence)
-            return gemini_vi
-
-        # P2: Online translators fallback (Google / MyMemory)
         candidates: List[str] = []
+        # best_substitutes are WordNet lemmas — already in base form, use directly as probes
         probes = list(best_substitutes[:2])
         if definition:
-            probes.append(" ".join(definition.split()[:5]))
+            probes = probes + [" ".join(definition.split()[:5])]
 
-        for term in probes:
-            if candidates:
-                break
-            await asyncio.sleep(0.35)
-            candidates.extend(await self._translate_term(term, "en", "vi"))
-
-        if not candidates:
-            for term in probes:
-                if candidates:
+        # Translate probes via manager in batch
+        if probes:
+            probe_results = await self._translate_terms_batch(
+                terms=probes,
+                source_lang="en",
+                target_lang="vi",
+            )
+            for p_tokens in probe_results:
+                if p_tokens:
+                    candidates.extend(p_tokens)
                     break
-                await asyncio.sleep(0.25)
-                candidates.extend(await self._translate_term(term, "en-US", "vi-VN", engine="mymemory"))
+
+        # Fallback to single term translation via manager if candidates empty
+        if not candidates and word:
+            candidates = await self._translate_term(word, "en", "vi")
 
         if candidates and translated_sentence:
             return self._verify_against_translation(candidates, translated_sentence)
@@ -949,37 +1293,6 @@ class VocabService:
         if candidates:
             return candidates[:3]
 
-        return []
-
-    async def _translate_with_gemini(
-        self,
-        word: str,
-        sentence_text: str,
-        definition: str,
-    ) -> List[str]:
-        """Use Gemini Client to translate target word in exact sentence context."""
-        if not self.gemini_client:
-            return []
-        prompt = (
-            f"Sentence: \"{sentence_text}\"\n"
-            f"Target word: \"{word}\" (concept: {definition})\n"
-            f"Translate ONLY the target word \"{word}\" as used in this exact sentence context into 1-3 natural Vietnamese dictionary meanings separated by commas.\n"
-            f"Do NOT translate the sentence. Return ONLY the Vietnamese word meanings."
-        )
-        try:
-            resp = await self.gemini_client.aio.models.generate_content(
-                model=self.gemini_model,
-                contents=prompt,
-                config=genai_types.GenerateContentConfig(temperature=0.1),
-            )
-            if resp and resp.text:
-                clean_text = resp.text.strip()
-                if "(NOTICE:" in clean_text:
-                    clean_text = clean_text[:clean_text.index("(NOTICE:")].strip()
-                meanings = [m.strip().lower() for m in clean_text.split(",") if m.strip()]
-                return meanings[:3]
-        except Exception as e:
-            logger.debug(f"Gemini word translation failed for '{word}': {e}")
         return []
 
     def _verify_against_translation(
@@ -992,39 +1305,6 @@ class VocabService:
         confirmed   = [c for c in candidates if c.lower() in trans_lower]
         unconfirmed = [c for c in candidates if c.lower() not in trans_lower]
         return (confirmed + unconfirmed)[:3] or candidates[:3]
-
-    async def _translate_term(
-        self,
-        term: str,
-        source: str,
-        target: str,
-        engine: str = "google",
-    ) -> List[str]:
-        """Translate a term and return clean tokens."""
-        try:
-            if engine == "mymemory":
-                result = await asyncio.to_thread(
-                    MyMemoryTranslator(source=source, target=target).translate, term)
-            else:
-                try:
-                    result = await asyncio.to_thread(
-                        GoogleTranslator(source=source, target=target).translate, term)
-                except Exception as g_err:
-                    logger.debug(f"[google] translate '{term}' error: {g_err}, trying mymemory fallback")
-                    result = await asyncio.to_thread(
-                        MyMemoryTranslator(source="en-US", target="vi-VN").translate, term)
-
-            if not result:
-                return []
-            if "(NOTICE:" in result:
-                result = result[:result.index("(NOTICE:")].strip()
-            if result.strip().lower() == term.lower():
-                return []
-
-            return [m.strip().lower() for m in result.split(",") if m.strip()]
-        except Exception as e:
-            logger.debug(f"[{engine}] translate '{term}': {e}")
-            return []
 
     def _build_direct_item(
         self,
@@ -1081,6 +1361,8 @@ class VocabService:
         )
 
     def _get_synsets(self, word_input, pos_tag: str = ""):
+        if pos_tag == "PROPN":
+            return []
         pos_map = {"NOUN": wn.NOUN, "VERB": wn.VERB, "ADJ": wn.ADJ, "ADV": wn.ADV}
         wn_pos = pos_map.get(pos_tag)
 

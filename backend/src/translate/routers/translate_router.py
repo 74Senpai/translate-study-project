@@ -57,10 +57,10 @@ def get_stats_service() -> StatsService:
     return _stats_service
 
 
-def get_vocab_service() -> VocabService:
+def get_vocab_service(translator: TranslateService = Depends(get_translate_service)) -> VocabService:
     global _vocab_service
     if _vocab_service is None:
-        _vocab_service = VocabService()
+        _vocab_service = VocabService(engine_manager=translator.engine_manager)
     return _vocab_service
 
 

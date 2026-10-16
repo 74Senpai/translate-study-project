@@ -1,17 +1,30 @@
 from supabase import Client
 
-table_name = "users"
-
 
 class AuthRepo():
     def __init__(self, admin: Client, user: Client):
         self.admin = admin
         self.user = user
-        self.name = table_name
 
-    def upsert_user(self, user: dict):
-        return self.admin.table(self.name).upsert(
-            user,
+    def upsert_profile(
+        self,
+        user_id: str,
+        email: str,
+        display_name: str,
+        avatar_url: str | None = None,
+    ):
+        normalized_email = email.strip()
+        if not normalized_email:
+            raise ValueError("A valid email is required to create a user profile.")
+
+        return self.admin.table("profiles").upsert(
+            {
+                "id": user_id,
+                "user_name": normalized_email.lower(),
+                "email": normalized_email,
+                "display_name": display_name,
+                "avatar_url": avatar_url,
+            },
             on_conflict="id",
             ignore_duplicates=False
         ).execute()
