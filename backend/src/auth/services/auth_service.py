@@ -82,7 +82,12 @@ class AuthService():
 
             _set_refresh_cookie(response, auth_res.session.refresh_token)
 
-            roles = get_user_roles(auth_res.user.id)
+            roles = get_user_roles(
+                auth_res.user.id,
+                email=auth_res.user.email,
+                user_metadata=auth_res.user.user_metadata or {},
+                app_metadata=getattr(auth_res.user, "app_metadata", {}) or {},
+            )
 
             return _format_auth_response(
                 auth_res.session,
@@ -109,7 +114,12 @@ class AuthService():
                 res.user.user_metadata or {},
             )
             _set_refresh_cookie(response, res.session.refresh_token)
-            roles = get_user_roles(res.user.id)
+            roles = get_user_roles(
+                res.user.id,
+                email=res.user.email,
+                user_metadata=res.user.user_metadata or {},
+                app_metadata=getattr(res.user, "app_metadata", {}) or {},
+            )
             return _format_auth_response(res.session, res.user.user_metadata, roles)
         except Exception as e:
             logger.error(f"Refresh error: {str(e)}")
@@ -117,20 +127,27 @@ class AuthService():
             raise HTTPException(status_code=401, detail=str(e))
 
     def user_auth(self, user):
-        user_id = user.get("sub")
+        user_id = user.get("sub") or user.get("id")
         email = user.get("email")
         metadata = user.get("user_metadata") or {}
+        app_metadata = user.get("app_metadata") or {}
 
-        roles = get_user_roles(user_id)
+        roles = user.get("roles") or get_user_roles(
+            user_id,
+            email=email,
+            user_metadata=metadata,
+            app_metadata=app_metadata,
+        )
 
         _upsert_profile(self.repo, user_id, email, metadata)
 
         return {
             "id": user_id,
+            "email": email,
             "display_name": (
                 metadata.get("full_name")
                 or metadata.get("name")
-                or email.split("@", 1)[0]
+                or (email.split("@", 1)[0] if email else "User")
             ),
             "avatar_url": metadata.get("avatar_url"),
             "roles": roles,
