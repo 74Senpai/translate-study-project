@@ -12,6 +12,7 @@ from src.api.health.router import router as health_router
 from src.api.client.router import router as client_router
 from src.api.admin.router import router as admin_router
 from src.auth.routers.auth_router import router as auth_router
+from src.flashcard.routers.flashcard_router import router as flashcard_router
 from src.routers import router as router_v2
 from src.config import get_settings
 from src.core.database import connect_db, close_db
@@ -100,6 +101,7 @@ def create_app() -> FastAPI:
     app.include_router(client_router)
     app.include_router(admin_router)
     app.include_router(auth_router)   # /auth/callback, /auth/refresh, /auth/me, /auth/logout
+    app.include_router(flashcard_router)
     app.include_router(router_v2)
 
     # Static file mounting if static folder exists

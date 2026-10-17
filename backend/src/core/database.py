@@ -14,6 +14,21 @@ async def connect_db():
         _client = AsyncIOMotorClient(settings.mongodb_uri, serverSelectionTimeoutMS=2000)
         _db = _client[settings.mongodb_db_name]
         logger.info(f"Connected to MongoDB database: {settings.mongodb_db_name}")
+
+        # Tạo indexes cho module Flashcard
+        try:
+            await _db["user_word_proficiency"].create_index(
+                [("user_id", 1), ("word", 1)], unique=True, background=True
+            )
+            await _db["flashcard_sessions"].create_index(
+                [("started_at", 1)], expireAfterSeconds=7200, name="ttl_flashcard_sessions_2h", background=True
+            )
+            await _db["flashcard_daily_usage"].create_index(
+                [("user_id", 1), ("set_id", 1), ("date_key", 1)], unique=True, background=True
+            )
+            logger.info("Flashcard MongoDB indexes initialized.")
+        except Exception as idx_err:
+            logger.debug(f"Flashcard index creation notice: {idx_err}")
     except Exception as e:
         logger.warning(f"Failed to connect to MongoDB ({e}). Running in degraded/offline DB mode.")
         _client = None

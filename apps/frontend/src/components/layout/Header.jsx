@@ -11,6 +11,7 @@ import {
   User,
   BrainCircuit,
   Settings,
+  ShieldCheck,
   Menu as MenuIcon,
 } from "lucide-react";
 
@@ -163,6 +164,17 @@ export default function Header() {
                       <Settings className="w-4 h-4" />
                       Cài đặt
                     </Link>
+
+                    {(user?.is_admin || user?.roles?.some((r) => ["ADMIN", "MANAGER", "CREATOR"].includes(r))) && (
+                      <Link
+                        to="/admin"
+                        onClick={() => setMenuOpen(false)}
+                        className="w-full flex items-center gap-3 px-4 py-2.5 text-sm font-bold text-indigo-600 hover:bg-indigo-50 no-underline transition-all"
+                      >
+                        <ShieldCheck className="w-4 h-4 text-indigo-600" />
+                        CMS Quản trị
+                      </Link>
+                    )}
 
                     <div className="border-t border-slate-50 my-1" />
                     <button

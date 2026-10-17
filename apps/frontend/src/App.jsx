@@ -18,6 +18,16 @@ import { useSettings } from "@/contexts/SettingsContext";
 import axiosInstance from "@/services/axiosInstance";
 import { useEffect, useState } from "react";
 import Toast from "@/components/ui/Toast";
+import { NotificationProvider } from "@/components/ui/NotificationProvider";
+
+// Admin CMS Pages
+import DashboardLayout from "@/pages/admin/DashboardLayout";
+import Overview from "@/pages/admin/Overview";
+import UserManagement from "@/pages/admin/UserManagement";
+import DictionaryManagement from "@/pages/admin/DictionaryManagement";
+import FlashcardManagement from "@/pages/admin/FlashcardManagement";
+import FlashcardEditor from "@/pages/admin/FlashcardEditor";
+import AdminErrorPage from "@/pages/admin/AdminErrorPage";
 
 export default function App() {
   const { isAuthenticated } = useAuth();
@@ -35,7 +45,7 @@ export default function App() {
   }, [isAuthenticated, localProficiency, syncLocalData]);
 
   return (
-    <>
+    <NotificationProvider>
       {syncNotification && (
         <Toast
           message={syncNotification}
@@ -90,8 +100,28 @@ export default function App() {
           }
         />
 
+        {/* Admin Console Routes */}
+        <Route
+          path="/admin"
+          element={
+            <ProtectedRoute requiredRoles={["ADMIN", "MANAGER", "CREATOR"]}>
+              <DashboardLayout />
+            </ProtectedRoute>
+          }
+        >
+          <Route index element={<Overview />} />
+          <Route path="users" element={<UserManagement />} />
+          <Route path="dictionary" element={<DictionaryManagement />} />
+          <Route path="flashcards" element={<FlashcardManagement />} />
+          <Route path="flashcards/new" element={<FlashcardEditor />} />
+          <Route path="flashcards/edit/:id" element={<FlashcardEditor />} />
+          <Route path="403" element={<AdminErrorPage code={403} />} />
+          <Route path="500" element={<AdminErrorPage code={500} />} />
+          <Route path="*" element={<AdminErrorPage code={404} />} />
+        </Route>
+
         <Route path="*" element={<NotFoundPage />} />
       </Routes>
-    </>
+    </NotificationProvider>
   );
 }

@@ -12,6 +12,7 @@ import {
   Unlock,
   AlertCircle,
   X,
+  Key,
 } from "lucide-react";
 import axiosInstance from "@/services/axiosInstance";
 import Header from "@/components/layout/Header";
@@ -25,6 +26,10 @@ export default function FlashcardListPage() {
   const [selectedSet, setSelectedSet] = useState(null);
   const [fetchingUsage, setFetchingUsage] = useState(false);
   const [usageData, setUsageData] = useState(null);
+  const [showInviteModal, setShowInviteModal] = useState(false);
+  const [inviteCode, setInviteCode] = useState("");
+  const [joining, setJoining] = useState(false);
+  const [inviteError, setInviteError] = useState("");
   const navigate = useNavigate();
 
   const fetchSets = async () => {
@@ -44,6 +49,30 @@ export default function FlashcardListPage() {
     }, 0);
     return () => clearTimeout(timer);
   }, []);
+
+  const handleJoinPrivateSet = async (e) => {
+    e.preventDefault();
+    if (!inviteCode.trim()) return;
+    try {
+      setJoining(true);
+      setInviteError("");
+      const { data } = await axiosInstance.post("/flashcards/join-private", {
+        invite_code: inviteCode.trim(),
+      });
+      setShowInviteModal(false);
+      setInviteCode("");
+      await fetchSets();
+      if (data.set_id) {
+        navigate(`/flashcards/play/${data.set_id}`);
+      }
+    } catch (err) {
+      setInviteError(
+        err.response?.data?.detail || "Mã mời không hợp lệ hoặc bộ thẻ không tồn tại."
+      );
+    } finally {
+      setJoining(false);
+    }
+  };
 
   const filteredSets = sets
     .filter((set) => set.is_public !== false)
@@ -79,13 +108,16 @@ export default function FlashcardListPage() {
           </div>
 
           <div className="flex flex-wrap items-center gap-4">
-            <button className="flex items-center gap-2 px-5 py-3 bg-white border border-slate-200 rounded-2xl font-black text-slate-700 hover:border-indigo-500 hover:text-indigo-600 transition-all shadow-sm">
-              <Filter className="w-4 h-4" />
-              All Levels
+            <button
+              onClick={() => setShowInviteModal(true)}
+              className="flex items-center gap-2 px-5 py-3 bg-indigo-50 border border-indigo-200 text-indigo-700 rounded-2xl font-black hover:bg-indigo-600 hover:text-white transition-all shadow-sm"
+            >
+              <Key className="w-4 h-4" />
+              Nhập mã mời
             </button>
             <div className="h-6 w-px bg-slate-200 hidden sm:block" />
             <span className="text-slate-400 text-sm font-bold uppercase tracking-wider">
-              Showing <b>{filteredSets.length}</b> public sets
+              Showing <b>{filteredSets.length}</b> sets
             </span>
           </div>
         </div>
@@ -319,6 +351,71 @@ export default function FlashcardListPage() {
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Join Private Set Modal */}
+      {showInviteModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-300">
+          <div className="bg-white w-full max-w-md rounded-[2.5rem] p-8 shadow-2xl border border-slate-100 relative animate-in zoom-in-95 duration-300">
+            <button
+              onClick={() => {
+                setShowInviteModal(false);
+                setInviteError("");
+              }}
+              className="absolute right-6 top-6 p-2 rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-all"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="w-14 h-14 bg-indigo-50 rounded-2xl flex items-center justify-center text-indigo-600 mb-6">
+              <Key className="w-7 h-7" />
+            </div>
+
+            <h3 className="text-2xl font-black text-slate-800 tracking-tight mb-2">
+              Tham gia Bộ Thẻ Riêng Tư
+            </h3>
+            <p className="text-sm text-slate-500 mb-6 font-medium">
+              Nhập mã mời được chia sẻ từ người tạo bộ thẻ để mở khóa và bắt đầu luyện tập.
+            </p>
+
+            {inviteError && (
+              <div className="flex items-center gap-2 p-4 bg-rose-50 text-rose-600 rounded-2xl mb-6 text-sm font-bold border border-rose-100">
+                <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                <span>{inviteError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleJoinPrivateSet} className="space-y-4">
+              <div>
+                <input
+                  type="text"
+                  value={inviteCode}
+                  onChange={(e) => setInviteCode(e.target.value.toUpperCase())}
+                  placeholder="VD: A1B2C3"
+                  maxLength={10}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-2xl py-4 px-6 text-center text-xl font-mono font-black text-slate-800 placeholder:text-slate-300 focus:bg-white focus:border-indigo-500 outline-none uppercase tracking-widest transition-all"
+                />
+              </div>
+
+              <div className="flex gap-4 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowInviteModal(false)}
+                  className="flex-1 py-4 px-6 bg-slate-100 text-slate-600 font-black rounded-2xl hover:bg-slate-200 transition-all"
+                >
+                  HỦY
+                </button>
+                <button
+                  type="submit"
+                  disabled={joining || !inviteCode.trim()}
+                  className="flex-[2] py-4 px-6 bg-indigo-600 text-white font-black rounded-2xl hover:bg-indigo-700 disabled:opacity-50 transition-all shadow-lg shadow-indigo-200"
+                >
+                  {joining ? "ĐANG KIỂM TRA..." : "THAM GIA"}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
