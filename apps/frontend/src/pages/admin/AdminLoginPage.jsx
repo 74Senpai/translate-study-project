@@ -2,7 +2,9 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 
-const LoginPage = () => {
+const STAFF_ROLES = ["ADMIN", "MANAGER", "CREATOR"];
+
+export default function AdminLoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -12,9 +14,8 @@ const LoginPage = () => {
 
   // Redirect if already logged in as staff
   useEffect(() => {
-    const allowedRoles = ["ADMIN", "MANAGER", "CREATOR"];
-    const isStaff = user?.roles?.some(role => allowedRoles.includes(role));
-    if (user && isStaff) navigate("/");
+    const isStaff = user?.roles?.some((r) => STAFF_ROLES.includes(r)) || user?.is_admin;
+    if (user && isStaff) navigate("/admin", { replace: true });
   }, [user, navigate]);
 
   const handleSubmit = async (e) => {
@@ -25,13 +26,18 @@ const LoginPage = () => {
     try {
       const { data, error: authError } = await login(email, password);
       if (authError) {
-        setError(
-          authError.message ||
-            "Đăng nhập thất bại. Vui lòng kiểm tra lại thông tin.",
-        );
-      } else if (data?.user) {
-        navigate("/");
+        setError(authError.message || "Đăng nhập thất bại. Vui lòng kiểm tra lại thông tin.");
+        return;
       }
+      // Role check after login
+      const isStaff =
+        data?.user?.roles?.some((r) => STAFF_ROLES.includes(r)) ||
+        data?.user?.is_admin;
+      if (!isStaff) {
+        setError("Tài khoản không có quyền truy cập trang quản trị.");
+        return;
+      }
+      navigate("/admin", { replace: true });
     } catch (err) {
       setError(err.message || "Đã xảy ra lỗi. Vui lòng thử lại.");
     } finally {
@@ -101,6 +107,4 @@ const LoginPage = () => {
       </div>
     </div>
   );
-};
-
-export default LoginPage;
+}

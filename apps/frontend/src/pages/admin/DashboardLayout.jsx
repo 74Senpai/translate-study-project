@@ -2,10 +2,13 @@ import { Link, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import {
   LayoutDashboard,
+  BookOpen,
+  MessageSquare,
   LogOut,
   Languages,
   Users,
   Layers,
+  GraduationCap,
   ArrowLeft,
 } from "lucide-react";
 
@@ -33,14 +36,19 @@ const SidebarLink = ({ to, children, icon: Icon, end = false }) => {
 export default function DashboardLayout() {
   const { user, logout } = useAuth();
   const userRoles = user?.roles || (user?.is_admin ? ["ADMIN"] : []);
-  const isAdminOrManager = user?.is_admin || userRoles.includes("ADMIN") || userRoles.includes("MANAGER");
+  const isAdmin    = user?.is_admin || userRoles.includes("ADMIN");
+  const isManager  = isAdmin || userRoles.includes("MANAGER");
+  const isCreator  = isManager || userRoles.includes("CREATOR");
 
   return (
     <div className="flex min-h-screen bg-slate-50 font-sans">
       {/* Sidebar */}
       <aside className="w-72 bg-white border-r border-slate-200 flex flex-col p-6 sticky top-0 h-screen">
         <div className="mb-10 px-2">
-          <Link to="/" className="inline-flex items-center gap-2 text-xs font-bold text-slate-400 hover:text-blue-600 mb-4 no-underline transition-colors">
+          <Link
+            to="/"
+            className="inline-flex items-center gap-2 text-xs font-bold text-slate-400 hover:text-blue-600 mb-4 no-underline transition-colors"
+          >
             <ArrowLeft size={14} />
             <span>Về ứng dụng chính</span>
           </Link>
@@ -53,15 +61,21 @@ export default function DashboardLayout() {
         </div>
 
         <nav className="flex-1 space-y-2">
-          {isAdminOrManager && (
+          {isManager && (
             <SidebarLink to="/admin" icon={LayoutDashboard} end={true}>
               Overview
             </SidebarLink>
           )}
 
-          {isAdminOrManager && (
+          {isManager && (
             <SidebarLink to="/admin/users" icon={Users}>
               Users
+            </SidebarLink>
+          )}
+
+          {isCreator && (
+            <SidebarLink to="/admin/library" icon={BookOpen}>
+              Library
             </SidebarLink>
           )}
 
@@ -69,7 +83,19 @@ export default function DashboardLayout() {
             Flashcards
           </SidebarLink>
 
-          {isAdminOrManager && (
+          {isCreator && (
+            <SidebarLink to="/admin/skills" icon={GraduationCap}>
+              Skills
+            </SidebarLink>
+          )}
+
+          {isManager && (
+            <SidebarLink to="/admin/feedback" icon={MessageSquare}>
+              Feedback
+            </SidebarLink>
+          )}
+
+          {isManager && (
             <SidebarLink to="/admin/dictionary" icon={Languages}>
               Dictionary
             </SidebarLink>

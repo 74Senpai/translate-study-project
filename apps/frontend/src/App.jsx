@@ -22,6 +22,7 @@ import { NotificationProvider } from "@/components/ui/NotificationProvider";
 
 // Admin CMS Pages
 import DashboardLayout from "@/pages/admin/DashboardLayout";
+import AdminLoginPage from "@/pages/admin/AdminLoginPage";
 import Overview from "@/pages/admin/Overview";
 import UserManagement from "@/pages/admin/UserManagement";
 import DictionaryManagement from "@/pages/admin/DictionaryManagement";
@@ -101,6 +102,14 @@ export default function App() {
         />
 
         {/* Admin Console Routes */}
+        <Route
+          path="/admin/login"
+          element={
+            <PublicRoute>
+              <AdminLoginPage />
+            </PublicRoute>
+          }
+        />
         <Route
           path="/admin"
           element={
