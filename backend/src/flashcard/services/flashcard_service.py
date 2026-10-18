@@ -316,9 +316,96 @@ class FlashcardService:
             )
         else:
             # Manual hoặc AI-gen: lấy thẻ có sẵn trong bộ
-            raw_cards = card_set.get("cards") or []
-            for c in raw_cards:
-                cards.append(FlashcardCard(**c))
+            raw_cards = [dict(c) for c in (card_set.get("cards") or [])]
+            available_meanings = list(dict.fromkeys(
+                str(c.get("meaning") or "").strip()
+                for c in raw_cards
+                if str(c.get("meaning") or "").strip()
+            ))
+
+            for card_data in raw_cards:
+                word = str(card_data.get("word") or "").strip()
+                meaning = str(card_data.get("meaning") or "").strip()
+                if not word or not meaning:
+                    continue
+                tasks = dict(card_data.get("tasks") or {})
+
+                choice = tasks.get("choice")
+                if isinstance(choice, dict) and choice.get("enabled"):
+                    options = []
+                    option_indices = {}
+                    for raw_option in choice.get("options") or []:
+                        if not isinstance(raw_option, dict):
+                            continue
+                        option = dict(raw_option)
+                        option_text = str(option.get("text") or "").strip()
+                        if not option_text:
+                            if option.get("is_correct") and meaning:
+                                option_text = meaning
+                            else:
+                                continue
+                        option["text"] = option_text
+                        normalized_option = option_text.casefold()
+                        if normalized_option in option_indices:
+                            existing_option = options[option_indices[normalized_option]]
+                            if option.get("is_correct"):
+                                existing_option["is_correct"] = True
+                            continue
+                        option_indices[normalized_option] = len(options)
+                        options.append(option)
+
+                    correct_options = [
+                        option for option in options
+                        if option.get("is_correct")
+                    ]
+                    if not correct_options and meaning:
+                        options.append({"text": meaning, "is_correct": True})
+
+                    option_texts = {
+                        str(option.get("text") or "").strip().casefold()
+                        for option in options
+                    }
+                    for distractor in available_meanings:
+                        normalized_distractor = distractor.casefold()
+                        if (
+                            len(options) >= 4
+                            or normalized_distractor == meaning.casefold()
+                            or normalized_distractor in option_texts
+                        ):
+                            continue
+                        options.append({"text": distractor, "is_correct": False})
+                        option_texts.add(normalized_distractor)
+                    choice["options"] = options
+                    tasks["choice"] = choice
+
+                fill = tasks.get("fill")
+                if isinstance(fill, dict) and fill.get("enabled"):
+                    answers = [
+                        str(answer).strip()
+                        for answer in (fill.get("answers") or [])
+                        if str(answer or "").strip()
+                    ]
+                    if not answers and word:
+                        answers = [word]
+                    fill["answers"] = answers
+                    tasks["fill"] = fill
+
+                complete = tasks.get("complete")
+                if isinstance(complete, dict) and complete.get("enabled"):
+                    patterns = [
+                        pattern
+                        for pattern in (complete.get("patterns") or [])
+                        if isinstance(pattern, dict)
+                        and str(pattern.get("display_text") or "").strip()
+                        and pattern.get("blanks")
+                    ]
+                    if not patterns and len(word) > 2:
+                        patterns = DynamicGenerator._create_complete_patterns(word)
+                    complete["patterns"] = patterns
+                    tasks["complete"] = complete
+
+                card_data["tasks"] = tasks
+                cards.append(FlashcardCard(**card_data))
 
         if not cards:
             raise HTTPException(status_code=400, detail="Bộ thẻ hiện chưa có từ vựng nào để luyện tập.")
@@ -553,7 +640,6 @@ class FlashcardService:
             "set_type": "manual",
             "settings": {
                 "total_cards": 5,
-                "difficulty_distribution": {"easy": 2, "medium": 2, "hard": 1},
                 "allowed_task_types": ["choice", "fill", "complete"],
                 "daily_limit": 10,
                 "reset_time": "07:00",
@@ -674,4 +760,3 @@ class FlashcardService:
     async def cleanup_old_sessions(self) -> Dict[str, Any]:
         """Dọn dẹp các session flashcard cũ quá 7 ngày."""
         return await self.repo.cleanup_old_sessions()
-

@@ -22,7 +22,6 @@ import {
   Library,
   Sparkles,
   BookOpen,
-  Volume2,
   ChevronDown,
 } from "lucide-react";
 import axiosInstance from "@/services/axiosInstance";
@@ -44,328 +43,6 @@ const DIFFICULTY_LEVELS = [
     color: "bg-rose-50 text-rose-600 border-rose-100",
   },
 ];
-
-const SOUND_PRESETS = {
-  gaming: {
-    preset: "gaming",
-    correct: {
-      wave: "sine",
-      volume: 0.12,
-      duration: 0.45,
-      note_delay: 0.12,
-      notes_by_streak: {
-        default: [261.63, 329.63],
-        x5: [587.33, 698.46, 880.0],
-        x10: [523.25, 659.25, 783.99, 987.77, 1046.5, 1318.51, 1567.98],
-      },
-    },
-    wrong: {
-      wave: "triangle",
-      volume: 0.18,
-      duration: 0.25,
-      frequencies: [150, 85],
-    },
-    finisher: {
-      wave: "sine",
-      volume: 0.1,
-      duration: 1.8,
-      preset_type: "triumphant",
-    },
-  },
-  retro: {
-    preset: "retro",
-    correct: {
-      wave: "square",
-      volume: 0.08,
-      duration: 0.2,
-      note_delay: 0.08,
-      notes_by_streak: {
-        default: [440.0, 554.37],
-        x5: [523.25, 659.25, 783.99],
-        x10: [523.25, 587.33, 659.25, 698.46, 783.99, 880.0, 987.77, 1046.5],
-      },
-    },
-    wrong: {
-      wave: "sawtooth",
-      volume: 0.06,
-      duration: 0.3,
-      frequencies: [220, 110],
-    },
-    finisher: {
-      wave: "square",
-      volume: 0.08,
-      duration: 1.0,
-      preset_type: "arcade",
-    },
-  },
-  zen: {
-    preset: "zen",
-    correct: {
-      wave: "sine",
-      volume: 0.14,
-      duration: 0.8,
-      note_delay: 0.25,
-      notes_by_streak: {
-        default: [329.63, 392.0],
-        x5: [329.63, 392.0, 440.0],
-        x10: [329.63, 392.0, 440.0, 523.25, 587.33],
-      },
-    },
-    wrong: {
-      wave: "sine",
-      volume: 0.14,
-      duration: 0.5,
-      frequencies: [120, 90],
-    },
-    finisher: {
-      wave: "sine",
-      volume: 0.12,
-      duration: 2.2,
-      preset_type: "zen",
-    },
-  },
-  scifi: {
-    preset: "scifi",
-    correct: {
-      wave: "sine",
-      volume: 0.09,
-      duration: 0.35,
-      note_delay: 0.08,
-      notes_by_streak: {
-        default: [587.33, 880.0],
-        x5: [880.0, 1174.66, 1760.0],
-        x10: [880.0, 987.77, 1174.66, 1318.51, 1567.98, 1760.0, 2093.0],
-      },
-    },
-    wrong: {
-      wave: "sawtooth",
-      volume: 0.1,
-      duration: 0.2,
-      frequencies: [300, 120],
-    },
-    finisher: {
-      wave: "sine",
-      volume: 0.1,
-      duration: 1.8,
-      preset_type: "scifi",
-    },
-  },
-  guitar: {
-    preset: "guitar",
-    correct: {
-      wave: "triangle",
-      volume: 0.15,
-      duration: 0.6,
-      note_delay: 0.15,
-      notes_by_streak: {
-        default: [329.63, 440.0],
-        x5: [329.63, 440.0, 554.37],
-        x10: [220.0, 277.18, 329.63, 440.0, 554.37, 659.25, 880.0],
-      },
-    },
-    wrong: {
-      wave: "triangle",
-      volume: 0.15,
-      duration: 0.4,
-      frequencies: [180, 130],
-    },
-    finisher: {
-      wave: "triangle",
-      volume: 0.12,
-      duration: 2.0,
-      preset_type: "guitar",
-    },
-  },
-  epic: {
-    preset: "epic",
-    correct: {
-      wave: "sine",
-      volume: 0.12,
-      duration: 0.5,
-      note_delay: 0.1,
-      notes_by_streak: {
-        default: [349.23, 523.25],
-        x5: [523.25, 659.25, 783.99],
-        x10: [261.63, 349.23, 392.0, 523.25, 587.33, 659.25, 783.99],
-      },
-    },
-    wrong: {
-      wave: "triangle",
-      volume: 0.18,
-      duration: 0.35,
-      frequencies: [140, 90],
-    },
-    finisher: {
-      wave: "sine",
-      volume: 0.12,
-      duration: 2.2,
-      preset_type: "epic",
-    },
-  },
-};
-
-// Sound testing helpers for Admin Sound Designer
-const testCorrectSound = (config) => {
-  try {
-    const AudioContext = window.AudioContext || window.webkitAudioContext;
-    if (!AudioContext) return;
-    const ctx = new AudioContext();
-
-    const notes = config.notes_by_streak?.x5 || [261.63, 329.63];
-
-    notes.forEach((freq, idx) => {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-
-      osc.type = config.wave || "sine";
-      osc.frequency.setValueAtTime(
-        freq,
-        ctx.currentTime + idx * (config.note_delay || 0.12),
-      );
-
-      const startTime = ctx.currentTime + idx * (config.note_delay || 0.12);
-      const duration = config.duration || 0.45;
-      const peakVol = config.volume || 0.12;
-
-      gain.gain.setValueAtTime(0, startTime);
-      gain.gain.linearRampToValueAtTime(peakVol, startTime + 0.015);
-      gain.gain.exponentialRampToValueAtTime(0.0001, startTime + duration);
-
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-
-      osc.start(startTime);
-      osc.stop(startTime + duration);
-    });
-  } catch (err) {
-    console.error("Test sound failed:", err);
-  }
-};
-
-const testWrongSound = (config) => {
-  try {
-    const AudioContext = window.AudioContext || window.webkitAudioContext;
-    if (!AudioContext) return;
-    const ctx = new AudioContext();
-
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-
-    osc.type = config.wave || "triangle";
-    const freqs = config.frequencies || [150, 85];
-    osc.frequency.setValueAtTime(freqs[0], ctx.currentTime);
-    osc.frequency.exponentialRampToValueAtTime(
-      freqs[1],
-      ctx.currentTime + (config.duration || 0.25),
-    );
-
-    gain.gain.setValueAtTime(config.volume || 0.18, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(
-      0.0001,
-      ctx.currentTime + (config.duration || 0.25),
-    );
-
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-
-    osc.start();
-    osc.stop(ctx.currentTime + (config.duration || 0.25));
-  } catch (err) {
-    console.error("Test wrong sound failed:", err);
-  }
-};
-
-const testFinisherSound = (config) => {
-  try {
-    const AudioContext = window.AudioContext || window.webkitAudioContext;
-    if (!AudioContext) return;
-    const ctx = new AudioContext();
-
-    let notes = [];
-    if (config.preset_type === "arcade") {
-      notes = [
-        { freq: 130.81, time: 0.0, dur: 0.15, wave: "square" },
-        { freq: 196.0, time: 0.1, dur: 0.15, wave: "square" },
-        { freq: 261.63, time: 0.2, dur: 0.15, wave: "square" },
-        { freq: 392.0, time: 0.3, dur: 0.15, wave: "square" },
-        { freq: 523.25, time: 0.4, dur: 0.4, wave: "square" },
-        { freq: 783.99, time: 0.4, dur: 0.4, wave: "square" },
-      ];
-    } else if (config.preset_type === "zen") {
-      notes = [
-        { freq: 329.63, time: 0.0, dur: 1.5, wave: "sine" },
-        { freq: 392.0, time: 0.3, dur: 1.5, wave: "sine" },
-        { freq: 440.0, time: 0.6, dur: 1.5, wave: "sine" },
-        { freq: 523.25, time: 0.9, dur: 2.0, wave: "sine" },
-      ];
-    } else if (config.preset_type === "scifi") {
-      notes = [
-        { freq: 440.0, time: 0.0, dur: 0.15, wave: "sine" },
-        { freq: 587.33, time: 0.1, dur: 0.15, wave: "sine" },
-        { freq: 880.0, time: 0.2, dur: 0.15, wave: "sine" },
-        { freq: 1174.66, time: 0.3, dur: 0.4, wave: "sine" },
-        { freq: 1760.0, time: 0.3, dur: 0.4, wave: "triangle" },
-      ];
-    } else if (config.preset_type === "guitar") {
-      notes = [
-        { freq: 164.81, time: 0.0, dur: 1.0, wave: "triangle" },
-        { freq: 220.0, time: 0.2, dur: 1.0, wave: "triangle" },
-        { freq: 277.18, time: 0.4, dur: 1.0, wave: "triangle" },
-        { freq: 329.63, time: 0.6, dur: 1.2, wave: "triangle" },
-        { freq: 440.0, time: 0.8, dur: 1.5, wave: "triangle" },
-      ];
-    } else if (config.preset_type === "epic") {
-      notes = [
-        { freq: 261.63, time: 0.0, dur: 0.2, wave: "sine" },
-        { freq: 349.23, time: 0.1, dur: 0.2, wave: "sine" },
-        { freq: 392.0, time: 0.2, dur: 0.2, wave: "sine" },
-        { freq: 523.25, time: 0.3, dur: 0.4, wave: "sine" },
-        { freq: 523.25, time: 0.5, dur: 0.2, wave: "sine" },
-        { freq: 587.33, time: 0.6, dur: 0.2, wave: "sine" },
-        { freq: 659.25, time: 0.7, dur: 0.2, wave: "sine" },
-        { freq: 783.99, time: 0.8, dur: 1.8, wave: "sine" },
-        { freq: 523.25, time: 0.8, dur: 1.8, wave: "triangle" },
-        { freq: 349.23, time: 0.8, dur: 1.8, wave: "sine" },
-      ];
-    } else {
-      notes = [
-        { freq: 261.63, time: 0.0, dur: 0.3, wave: "sine" },
-        { freq: 329.63, time: 0.15, dur: 0.3, wave: "sine" },
-        { freq: 392.0, time: 0.3, dur: 0.3, wave: "sine" },
-        { freq: 523.25, time: 0.45, dur: 0.3, wave: "sine" },
-        { freq: 659.25, time: 0.6, dur: 0.45, wave: "triangle" },
-        { freq: 783.99, time: 0.75, dur: 0.5, wave: "triangle" },
-        { freq: 523.25, time: 0.95, dur: 1.6, wave: "sine" },
-        { freq: 659.25, time: 0.95, dur: 1.6, wave: "triangle" },
-        { freq: 783.99, time: 0.95, dur: 1.6, wave: "sine" },
-        { freq: 1046.5, time: 0.95, dur: 1.8, wave: "triangle" },
-      ];
-    }
-
-    notes.forEach((note) => {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-
-      osc.type = note.wave || config.wave || "sine";
-      osc.frequency.setValueAtTime(note.freq, ctx.currentTime + note.time);
-
-      const startTime = ctx.currentTime + note.time;
-      const volume = config.volume || 0.1;
-
-      gain.gain.setValueAtTime(0, startTime);
-      gain.gain.linearRampToValueAtTime(volume, startTime + 0.05);
-      gain.gain.exponentialRampToValueAtTime(0.0001, startTime + note.dur);
-
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-
-      osc.start(startTime);
-      osc.stop(startTime + note.dur);
-    });
-  } catch (err) {
-    console.error("Test finisher failed:", err);
-  }
-};
 
 const generateCardFromVocab = (vocabItem, allVocabs) => {
   const word = vocabItem.word;
@@ -498,7 +175,6 @@ export default function FlashcardEditor() {
     is_dynamic: false,
     settings: {
       total_cards: 20,
-      difficulty_distribution: { easy: 5, medium: 10, hard: 5 },
       allowed_task_types: ["choice", "fill", "complete"],
       time_limit_mode: "per_card",
       per_card_timer: 15,
@@ -507,7 +183,6 @@ export default function FlashcardEditor() {
       reset_time: "07:00",
       event_start_at: null,
       event_end_at: null,
-      sound_config: { ...SOUND_PRESETS.gaming },
     },
     cards: [],
   });
@@ -518,7 +193,7 @@ export default function FlashcardEditor() {
   const [aiPrompt, setAiPrompt] = useState("");
   const [aiDifficulty, setAiDifficulty] = useState(["medium"]);
   const [aiCount, setAiCount] = useState(10);
-  const [aiTaskTypes, setAiTaskTypes] = useState([
+  const [aiTaskTypes] = useState([
     "choice",
     "fill",
     "complete",
@@ -549,9 +224,6 @@ export default function FlashcardEditor() {
       const { data } = await axiosInstance.get(`/flashcards/${id}`);
       // Ensure data settings exists and has all required properties
       if (data.settings) {
-        if (!data.settings.sound_config) {
-          data.settings.sound_config = { ...SOUND_PRESETS.gaming };
-        }
         if (!data.settings.reset_time) {
           data.settings.reset_time = "07:00";
         }
@@ -564,7 +236,6 @@ export default function FlashcardEditor() {
       } else {
         data.settings = {
           total_cards: 20,
-          difficulty_distribution: { easy: 5, medium: 10, hard: 5 },
           allowed_task_types: ["choice", "fill", "complete"],
           time_limit_mode: "per_card",
           per_card_timer: 15,
@@ -573,7 +244,6 @@ export default function FlashcardEditor() {
           reset_time: "07:00",
           event_start_at: null,
           event_end_at: null,
-          sound_config: { ...SOUND_PRESETS.gaming },
         };
       }
       if (data.cards && Array.isArray(data.cards)) {
@@ -1656,42 +1326,7 @@ export default function FlashcardEditor() {
               </div>
             </div>
 
-            {/* Daily Reset Time Config */}
-            <div className="space-y-3 pt-6 border-t border-slate-100">
-              <label className="text-[11px] font-black text-slate-500 uppercase tracking-[0.2em] ml-1">
-                Giờ làm mới (Daily Reset Time)
-              </label>
-              <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center">
-                <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 group hover:border-indigo-200 transition-all w-full sm:w-44">
-                  <span className="text-[9px] font-black text-slate-400 uppercase block mb-1">
-                    Thời gian Reset (HH:MM)
-                  </span>
-                  <input
-                    type="time"
-                    value={setInfo.settings?.reset_time || "07:00"}
-                    onChange={(e) =>
-                      setSetInfo({
-                        ...setInfo,
-                        settings: {
-                          ...setInfo.settings,
-                          reset_time: e.target.value,
-                        },
-                      })
-                    }
-                    className="w-full bg-transparent border-none outline-none font-black text-lg text-slate-800"
-                  />
-                </div>
-                <div className="text-xs font-bold text-slate-400 leading-relaxed">
-                  <span className="font-black text-slate-600 block mb-0.5">
-                    Múi giờ Việt Nam (ICT)
-                  </span>
-                  Hệ thống tự động đồng bộ theo múi giờ UTC để đảm bảo chuỗi
-                  ngày và XP luôn chính xác.
-                </div>
-              </div>
-            </div>
-
-            {/* Special Event Timing Config */}
+              {/* Special Event Timing Config */}
             <div className="space-y-3 pt-6 border-t border-slate-100">
               <label className="text-[11px] font-black text-slate-500 uppercase tracking-[0.2em] ml-1">
                 Lịch trình Sự kiện Đặc biệt
@@ -1758,489 +1393,13 @@ export default function FlashcardEditor() {
               </p>
             </div>
 
-            {/* Event Rewards Config */}
-            <div className="space-y-3 pt-6 border-t border-slate-100">
-              <label className="text-[11px] font-black text-slate-500 uppercase tracking-[0.2em] ml-1">
-                Phần thưởng XP Sự kiện
-              </label>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 group hover:border-amber-200 transition-all">
-                  <span className="text-[9px] font-black text-slate-400 uppercase block mb-1">
-                    Thưởng hoàn thành lần đầu
-                  </span>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="number"
-                      value={setInfo.settings?.reward_first_time ?? ""}
-                      onChange={(e) =>
-                        setSetInfo({
-                          ...setInfo,
-                          settings: {
-                            ...setInfo.settings,
-                            reward_first_time: e.target.value === "" ? "" : (parseInt(e.target.value) || 0),
-                          },
-                        })
-                      }
-                      className="w-full bg-transparent border-none outline-none font-black text-xl text-slate-800"
-                    />
-                    <span className="text-[10px] font-black text-slate-400 uppercase">XP</span>
-                  </div>
-                </div>
-                <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 group hover:border-amber-200 transition-all">
-                  <span className="text-[9px] font-black text-slate-400 uppercase block mb-1">
-                    Thưởng tinh thông (Mastery)
-                  </span>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="number"
-                      value={setInfo.settings?.reward_mastery ?? ""}
-                      onChange={(e) =>
-                        setSetInfo({
-                          ...setInfo,
-                          settings: {
-                            ...setInfo.settings,
-                            reward_mastery: e.target.value === "" ? "" : (parseInt(e.target.value) || 0),
-                          },
-                        })
-                      }
-                      className="w-full bg-transparent border-none outline-none font-black text-xl text-slate-800"
-                    />
-                    <span className="text-[10px] font-black text-slate-400 uppercase">XP</span>
-                  </div>
-                </div>
-              </div>
-              <p className="text-[10px] font-bold text-amber-600 leading-normal mt-1 italic">
-                * Chỉ áp dụng khi bộ thẻ có thiết lập lịch trình Sự kiện bên trên.
-              </p>
-            </div>
-          </div>
-
-          <div className="space-y-6">
-            {!setInfo.is_dynamic ? (
-              <div className="space-y-3">
-                <label className="text-[11px] font-black text-slate-500 uppercase tracking-[0.2em] ml-1">
-                  Difficulty Balance
-                </label>
-                <div className="space-y-4">
-                  {["easy", "medium", "hard"].map((level) => {
-                    const availableCount = setInfo.cards.filter(
-                      (c) => (c.difficulty || "medium").toLowerCase() === level,
-                    ).length;
-                    const currentValue =
-                      setInfo.settings?.difficulty_distribution?.[level] || 0;
-
-                    return (
-                      <div key={level} className="flex flex-col gap-1">
-                        <div className="flex items-center justify-between px-1">
-                          <span
-                            className={`text-[9px] font-black uppercase tracking-widest ${level === "easy" ? "text-emerald-500" : level === "medium" ? "text-amber-500" : "text-rose-500"}`}
-                          >
-                            {level}{" "}
-                            <span className="opacity-40 ml-1">
-                              ({availableCount} available)
-                            </span>
-                          </span>
-                          <span className="font-black text-slate-800 text-[11px] tabular-nums">
-                            {currentValue}
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-4">
-                          <input
-                            type="range"
-                            min="0"
-                            max={availableCount}
-                            value={
-                              currentValue > availableCount
-                                ? availableCount
-                                : currentValue
-                            }
-                            onChange={(e) => {
-                              const val = parseInt(e.target.value);
-                              const nextDist = {
-                                ...(setInfo.settings?.difficulty_distribution || {}),
-                                [level]: val,
-                              };
-                              const nextTotal =
-                                (nextDist.easy || 0) +
-                                (nextDist.medium || 0) +
-                                (nextDist.hard || 0);
-
-                              setSetInfo({
-                                ...setInfo,
-                                settings: {
-                                  ...setInfo.settings,
-                                  difficulty_distribution: nextDist,
-                                  total_cards: nextTotal,
-                                },
-                              });
-                            }}
-                            className="flex-1 h-1.5 bg-slate-100 rounded-lg appearance-none cursor-pointer accent-indigo-600"
-                          />
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-                <p className="text-[10px] font-medium text-slate-400 italic">
-                  Distribute how many cards of each level should appear in a
-                  session.
-                </p>
-              </div>
-            ) : (
-              <div className="bg-indigo-50/50 border border-indigo-100/50 rounded-3xl p-6 space-y-3">
-                <h4 className="text-xs font-black text-indigo-900 uppercase tracking-wider">Dynamic Generation Active</h4>
-                <p className="text-xs text-slate-500 leading-relaxed font-medium">
-                  Hệ thống tự động thiết lập số lượng và phân bổ độ khó dựa trên dữ liệu học tập thực tế của từng người dùng.
-                </p>
-                <p className="text-[10px] text-indigo-600 font-bold leading-normal">
-                  ✓ Không cần nhập thủ công câu hỏi hay danh sách thẻ.<br/>
-                  ✓ Cấu hình thẻ chơi mỗi lượt bằng input &quot;Cards per Play&quot; bên trái.
-                </p>
-              </div>
-            )}
           </div>
         </div>
       </div>
 
-      {/* Synthesizer Sound Designer & Cards List - Hidden in Dynamic Mode */}
+      {/* Cards List - Hidden in Dynamic Mode */}
       {!setInfo.is_dynamic && (
         <>
-          {/* Synthesizer Sound Designer */}
-          <div className="bg-white rounded-[2rem] p-8 border border-slate-200 shadow-sm mb-10 space-y-8">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-slate-50 pb-4">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
-              <Volume2 className="w-5 h-5 animate-pulse" />
-            </div>
-            <div>
-              <h3 className="text-lg font-black text-slate-800 tracking-tight">
-                Synthesizer Sound Designer
-              </h3>
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                Design custom sound effects & chimes for this set
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2 bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-100 self-start sm:self-auto">
-            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
-              Preset:
-            </span>
-            <select
-              value={setInfo.settings?.sound_config?.preset || "gaming"}
-              onChange={(e) => {
-                const pName = e.target.value;
-                setSetInfo({
-                  ...setInfo,
-                  settings: {
-                    ...setInfo.settings,
-                    sound_config: { ...SOUND_PRESETS[pName] },
-                  },
-                });
-              }}
-              className="bg-transparent text-slate-700 font-bold text-xs outline-none cursor-pointer border-none"
-            >
-              <option value="gaming">Cyber Gaming (Valorant)</option>
-              <option value="retro">8-Bit Retro Arcade</option>
-              <option value="zen">Soft Zen Harmony</option>
-              <option value="scifi">Sci-Fi Cosmic Synth</option>
-              <option value="guitar">Warm Plucked Guitar</option>
-              <option value="epic">Epic Victory Fanfare</option>
-            </select>
-          </div>
-        </div>
-
-        {setInfo.settings?.sound_config &&
-          (() => {
-            const config = setInfo.settings.sound_config;
-            return (
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-                {/* Correct Chime */}
-                <div className="bg-slate-50 p-6 rounded-3xl border border-slate-100 flex flex-col justify-between space-y-6">
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-black text-emerald-500 uppercase tracking-widest">
-                        Correct Chime
-                      </span>
-                      <span className="text-[10px] font-black text-slate-400 capitalize bg-white px-2 py-0.5 rounded border border-slate-100">
-                        {config.correct?.wave}
-                      </span>
-                    </div>
-                    <p className="text-xs text-slate-500 font-medium leading-relaxed">
-                      Chime scale played upon answering a flashcard correctly.
-                    </p>
-
-                    <div className="space-y-4 pt-2">
-                      <div className="space-y-1.5">
-                        <div className="flex justify-between text-[9px] font-black text-slate-400 uppercase">
-                          <span>Waveform</span>
-                        </div>
-                        <select
-                          value={config.correct?.wave || "sine"}
-                          onChange={(e) => {
-                            setSetInfo({
-                              ...setInfo,
-                              settings: {
-                                ...setInfo.settings,
-                                sound_config: {
-                                  ...config,
-                                  correct: {
-                                    ...config.correct,
-                                    wave: e.target.value,
-                                  },
-                                },
-                              },
-                            });
-                          }}
-                          className="w-full bg-white border border-slate-200 text-slate-700 font-bold text-xs px-3 py-2 rounded-xl outline-none cursor-pointer"
-                        >
-                          <option value="sine">Sine (Pure/Sweet)</option>
-                          <option value="triangle">
-                            Triangle (Soft Chime)
-                          </option>
-                          <option value="square">Square (Arcade Chime)</option>
-                          <option value="sawtooth">
-                            Sawtooth (Sharp Synth)
-                          </option>
-                        </select>
-                      </div>
-
-                      <div className="space-y-1.5">
-                        <div className="flex justify-between text-[9px] font-black text-slate-400 uppercase">
-                          <span>Volume</span>
-                          <span className="text-slate-600 font-bold">
-                            {Math.round((config.correct?.volume || 0.12) * 100)}
-                            %
-                          </span>
-                        </div>
-                        <input
-                          type="range"
-                          min="0"
-                          max="0.3"
-                          step="0.01"
-                          value={config.correct?.volume || 0.12}
-                          onChange={(e) => {
-                            setSetInfo({
-                              ...setInfo,
-                              settings: {
-                                ...setInfo.settings,
-                                sound_config: {
-                                  ...config,
-                                  correct: {
-                                    ...config.correct,
-                                    volume: parseFloat(e.target.value),
-                                  },
-                                },
-                              },
-                            });
-                          }}
-                          className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-emerald-500"
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => testCorrectSound(config.correct)}
-                    className="w-full py-3 bg-emerald-50 hover:bg-emerald-100/70 text-emerald-600 font-black rounded-2xl transition-all border border-emerald-100 text-xs flex items-center justify-center gap-1.5 active:scale-[0.98]"
-                  >
-                    <Volume2 className="w-4 h-4" /> TEST CORRECT CHIME
-                  </button>
-                </div>
-
-                {/* Wrong Alert */}
-                <div className="bg-slate-50 p-6 rounded-3xl border border-slate-100 flex flex-col justify-between space-y-6">
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-black text-rose-500 uppercase tracking-widest">
-                        Wrong Alert
-                      </span>
-                      <span className="text-[10px] font-black text-slate-400 capitalize bg-white px-2 py-0.5 rounded border border-slate-100">
-                        {config.wrong?.wave}
-                      </span>
-                    </div>
-                    <p className="text-xs text-slate-500 font-medium leading-relaxed">
-                      Descending frequencies alert triggered on incorrect
-                      answers.
-                    </p>
-
-                    <div className="space-y-4 pt-2">
-                      <div className="space-y-1.5">
-                        <div className="flex justify-between text-[9px] font-black text-slate-400 uppercase">
-                          <span>Waveform</span>
-                        </div>
-                        <select
-                          value={config.wrong?.wave || "triangle"}
-                          onChange={(e) => {
-                            setSetInfo({
-                              ...setInfo,
-                              settings: {
-                                ...setInfo.settings,
-                                sound_config: {
-                                  ...config,
-                                  wrong: {
-                                    ...config.wrong,
-                                    wave: e.target.value,
-                                  },
-                                },
-                              },
-                            });
-                          }}
-                          className="w-full bg-white border border-slate-200 text-slate-700 font-bold text-xs px-3 py-2 rounded-xl outline-none cursor-pointer"
-                        >
-                          <option value="sine">Sine (Pure/Sweet)</option>
-                          <option value="triangle">
-                            Triangle (Soft Chime)
-                          </option>
-                          <option value="square">Square (Arcade Chime)</option>
-                          <option value="sawtooth">
-                            Sawtooth (Sharp Synth)
-                          </option>
-                        </select>
-                      </div>
-
-                      <div className="space-y-1.5">
-                        <div className="flex justify-between text-[9px] font-black text-slate-400 uppercase">
-                          <span>Volume</span>
-                          <span className="text-slate-600 font-bold">
-                            {Math.round((config.wrong?.volume || 0.18) * 100)}%
-                          </span>
-                        </div>
-                        <input
-                          type="range"
-                          min="0"
-                          max="0.4"
-                          step="0.01"
-                          value={config.wrong?.volume || 0.18}
-                          onChange={(e) => {
-                            setSetInfo({
-                              ...setInfo,
-                              settings: {
-                                ...setInfo.settings,
-                                sound_config: {
-                                  ...config,
-                                  wrong: {
-                                    ...config.wrong,
-                                    volume: parseFloat(e.target.value),
-                                  },
-                                },
-                              },
-                            });
-                          }}
-                          className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-rose-500"
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => testWrongSound(config.wrong)}
-                    className="w-full py-3 bg-rose-50 hover:bg-rose-100/70 text-rose-600 font-black rounded-2xl transition-all border border-rose-100 text-xs flex items-center justify-center gap-1.5 active:scale-[0.98]"
-                  >
-                    <Volume2 className="w-4 h-4" /> TEST WRONG ALERT
-                  </button>
-                </div>
-
-                {/* Finisher Theme */}
-                <div className="bg-slate-50 p-6 rounded-3xl border border-slate-100 flex flex-col justify-between space-y-6">
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-black text-amber-500 uppercase tracking-widest">
-                        Finisher Theme
-                      </span>
-                      <span className="text-[10px] font-black text-slate-400 capitalize bg-white px-2 py-0.5 rounded border border-slate-100">
-                        {config.finisher?.wave}
-                      </span>
-                    </div>
-                    <p className="text-xs text-slate-500 font-medium leading-relaxed">
-                      Triumphant finisher melody unlocked by keeping high
-                      streak.
-                    </p>
-
-                    <div className="space-y-4 pt-2">
-                      <div className="space-y-1.5">
-                        <div className="flex justify-between text-[9px] font-black text-slate-400 uppercase">
-                          <span>Waveform</span>
-                        </div>
-                        <select
-                          value={config.finisher?.wave || "sine"}
-                          onChange={(e) => {
-                            setSetInfo({
-                              ...setInfo,
-                              settings: {
-                                ...setInfo.settings,
-                                sound_config: {
-                                  ...config,
-                                  finisher: {
-                                    ...config.finisher,
-                                    wave: e.target.value,
-                                  },
-                                },
-                              },
-                            });
-                          }}
-                          className="w-full bg-white border border-slate-200 text-slate-700 font-bold text-xs px-3 py-2 rounded-xl outline-none cursor-pointer"
-                        >
-                          <option value="sine">Sine (Pure/Sweet)</option>
-                          <option value="triangle">
-                            Triangle (Soft Chime)
-                          </option>
-                          <option value="square">Square (Arcade Chime)</option>
-                          <option value="sawtooth">
-                            Sawtooth (Sharp Synth)
-                          </option>
-                        </select>
-                      </div>
-
-                      <div className="space-y-1.5">
-                        <div className="flex justify-between text-[9px] font-black text-slate-400 uppercase">
-                          <span>Volume</span>
-                          <span className="text-slate-600 font-bold">
-                            {Math.round((config.finisher?.volume || 0.1) * 100)}
-                            %
-                          </span>
-                        </div>
-                        <input
-                          type="range"
-                          min="0"
-                          max="0.3"
-                          step="0.01"
-                          value={config.finisher?.volume || 0.1}
-                          onChange={(e) => {
-                            setSetInfo({
-                              ...setInfo,
-                              settings: {
-                                ...setInfo.settings,
-                                sound_config: {
-                                  ...config,
-                                  finisher: {
-                                    ...config.finisher,
-                                    volume: parseFloat(e.target.value),
-                                  },
-                                },
-                              },
-                            });
-                          }}
-                          className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-amber-500"
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => testFinisherSound(config.finisher)}
-                    className="w-full py-3 bg-amber-50 hover:bg-amber-100/70 text-amber-600 font-black rounded-2xl transition-all border border-amber-100 text-xs flex items-center justify-center gap-1.5 active:scale-[0.98]"
-                  >
-                    <Volume2 className="w-4 h-4" /> TEST FINISHER MELODY
-                  </button>
-                </div>
-              </div>
-            );
-          })()}
-      </div>
-
       {/* Cards List */}
       <div className="space-y-8">
         <div className="flex items-center justify-between px-2">
@@ -2475,7 +1634,7 @@ export default function FlashcardEditor() {
                           {/* Question / Instruction */}
                           <div className="space-y-1.5">
                             <label className="text-[10px] font-black text-indigo-500 uppercase tracking-widest ml-1 flex items-center gap-1.5">
-                              Primary Question / Instruction (Prompt)
+                              Primary Question / Instruction (Choice prompt; Fill and Complete use task-specific instructions)
                             </label>
                             <input
                               type="text"
@@ -2488,7 +1647,25 @@ export default function FlashcardEditor() {
                                 )
                               }
                               className="w-full bg-indigo-50/30 border-2 border-indigo-100/10 focus:border-indigo-500/30 p-3.5 rounded-xl outline-none transition-all font-bold text-slate-800 text-sm"
-                              placeholder="e.g. What is the English translation for 'Xin chào'?"
+                              placeholder='e.g. What does "Hello" mean?'
+                            />
+                          </div>
+                          <div className="space-y-1.5">
+                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">
+                              Example sentence / context
+                            </label>
+                            <textarea
+                              value={card.context || ""}
+                              onChange={(e) =>
+                                handleCardChange(
+                                  card.id,
+                                  "context",
+                                  e.target.value,
+                                )
+                              }
+                              rows={2}
+                              className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-300 p-3.5 rounded-xl outline-none transition-all font-medium text-slate-700 text-sm resize-y"
+                              placeholder='e.g. "Hello, how are you?"'
                             />
                           </div>
 

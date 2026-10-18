@@ -103,10 +103,7 @@ class AIFlashcardGenerator:
                 distractors=distractors,
                 allowed_task_types=task_types,
                 proficiency=0.0,
-                ipa=item.get("ipa"),
-                context=item.get("example"),
                 definition_en=item.get("definition_en"),
-                definition_vi=item.get("definition_vi"),
             )
 
             hint = item.get("hint") if include_hint else ""

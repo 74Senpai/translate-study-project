@@ -3,13 +3,6 @@ from datetime import datetime
 from pydantic import BaseModel, Field, field_validator
 
 
-class SoundConfig(BaseModel):
-    preset: Optional[str] = "gaming"
-    correct: Optional[Dict[str, Any]] = None
-    wrong: Optional[Dict[str, Any]] = None
-    finisher: Optional[Dict[str, Any]] = None
-
-
 class LeitnerConfig(BaseModel):
     boxes: List[int] = Field(default=[1, 2, 5, 8, 14], description="Khoảng cách ngày ôn tập giữa các box")
     priority: str = Field(
@@ -24,7 +17,6 @@ class FlashcardSettings(BaseModel):
     model_config = {"extra": "ignore"}
 
     total_cards: int = 20
-    difficulty_distribution: Dict[str, int] = Field(default={"easy": 5, "medium": 10, "hard": 5})
     allowed_task_types: List[str] = Field(
         default=["choice", "fill", "complete"],
         description="choice, fill, complete, listen_choice, listen_write, multiple_choice, def_choice, def_write, context_def_vi, context_def_en"
@@ -36,7 +28,6 @@ class FlashcardSettings(BaseModel):
     reset_time: str = Field(default="07:00", description="Thời điểm reset lượt làm trong ngày (HH:MM)")
     event_start_at: Optional[str] = Field(default=None, description="Thời gian mở bộ thẻ (ISO format)")
     event_end_at: Optional[str] = Field(default=None, description="Thời gian đóng bộ thẻ (ISO format)")
-    sound_config: Optional[Dict[str, Any]] = None
     leitner_config: Optional[LeitnerConfig] = None
 
     @field_validator("daily_limit", mode="before")
@@ -361,4 +352,3 @@ class DictionaryCacheItem(BaseModel):
     definition_vi: Optional[str] = None
     example_en: Optional[str] = None
     audio_url: Optional[str] = None
-

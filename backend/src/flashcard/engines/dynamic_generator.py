@@ -8,7 +8,6 @@ from src.flashcard.models.flashcard_models import (
     LeitnerConfig,
     FlashcardSettings,
 )
-from src.flashcard.engines.scoring_engine import ScoringEngine
 
 
 class DynamicGenerator:
@@ -54,20 +53,23 @@ class DynamicGenerator:
         distractors: List[str],
         allowed_task_types: List[str],
         proficiency: float = 0.0,
-        ipa: Optional[str] = None,
-        context: Optional[str] = None,
         definition_en: Optional[str] = None,
-        definition_vi: Optional[str] = None
     ) -> Dict[str, Any]:
         """Xây dựng các dạng bài tập phù hợp cho card."""
         options = [{"text": meaning, "is_correct": True}]
-        for d in distractors[:3]:
-            if d and d != meaning:
-                options.append({"text": d, "is_correct": False})
-        
-        # Đảm bảo đủ 4 phương án trắc nghiệm nếu có thể
-        while len(options) < 4 and len(distractors) > 0:
-            options.append({"text": f"{meaning} (ngữ cảnh khác)", "is_correct": False})
+        seen_meanings = {meaning.strip().casefold()}
+        for distractor in distractors:
+            clean_distractor = str(distractor or "").strip()
+            normalized_distractor = clean_distractor.casefold()
+            if (
+                not clean_distractor
+                or normalized_distractor in seen_meanings
+            ):
+                continue
+            options.append({"text": clean_distractor, "is_correct": False})
+            seen_meanings.add(normalized_distractor)
+            if len(options) == 4:
+                break
         random.shuffle(options)
 
         tasks: Dict[str, Any] = {
@@ -187,11 +189,34 @@ class DynamicGenerator:
             item["attempts"] = item.get("encountered_count", 0) + item.get("translated_count", 0)
 
             # Lấy từ Supabase user_sense_progress
-            if supabase_client and item.get("word_id"):
+            if supabase_client:
                 try:
-                    s_id_res = supabase_client.table("senses").select("id").eq("word_id", item["word_id"]).limit(1).execute()
-                    if s_id_res.data:
-                        sense_pk = s_id_res.data[0]["id"]
+                    word_id = item.get("word_id")
+                    if not word_id:
+                        word_res = supabase_client.table("words").select(
+                            "id"
+                        ).eq("word_text", w.lower()).maybe_single().execute()
+                        word_id = word_res.data.get("id") if word_res and word_res.data else None
+
+                    if word_id:
+                        sense_res = supabase_client.table("senses").select(
+                            "id, meaning_vi, ipa, definition_en, definition_vi, example_en"
+                        ).eq("word_id", word_id).limit(20).execute()
+                        sense_candidates = [
+                            sense for sense in (sense_res.data or [])
+                            if str(sense.get("meaning_vi") or "").strip()
+                        ]
+                    else:
+                        sense_candidates = []
+
+                    if sense_candidates:
+                        sense_data = max(
+                            sense_candidates,
+                            key=lambda sense: bool(str(sense.get("example_en") or "").strip()),
+                        )
+                        sense_pk = sense_data.get("id")
+                        item["word_id"] = word_id
+                        item["sense"] = sense_data
                         item["sense_id"] = sense_pk
                         prog_res = supabase_client.table("user_sense_progress").select(
                             "mastery_score, current_repetition_id, next_review, wrong_count"
@@ -235,44 +260,24 @@ class DynamicGenerator:
 
         selected_words = filtered_words[:total_cards]
 
-        # 6. Lấy nghĩa tiếng Việt, định nghĩa và distractors từ senses
+        # 6. Build choices from actual translations, never from placeholder meanings.
+        sense_items = [item for item in selected_words if item.get("sense")]
+
+        available_meanings = list(dict.fromkeys(
+            str(entry["sense"].get("meaning_vi") or "").strip()
+            for entry in sense_items
+        ))
         cards: List[FlashcardCard] = []
-        sample_distractors = ["thành công", "phát triển", "nguy hiểm", "thực hiện", "quan trọng", "chính xác", "kết quả", "cơ hội"]
-
-        for idx, item in enumerate(selected_words):
+        for item in sense_items:
             word_str = item["word"]
-            meaning = "Nghĩa đang cập nhật"
-            ipa = None
-            def_en = None
-            def_vi = None
-            context = None
-            sense_id = item.get("sense_id")
-            distractors = list(sample_distractors)
-
-            if supabase_client:
-                try:
-                    s_query = supabase_client.table("senses").select(
-                        "id, meaning_vi, ipa, definition_en, definition_vi, example_en"
-                    )
-                    if item.get("word_id"):
-                        s_resp = s_query.eq("word_id", item["word_id"]).limit(1).execute()
-                    else:
-                        w_res = supabase_client.table("words").select("id").eq("word_text", word_str.lower()).maybe_single().execute()
-                        if w_res and w_res.data:
-                            s_resp = s_query.eq("word_id", w_res.data["id"]).limit(1).execute()
-                        else:
-                            s_resp = None
-
-                    if s_resp and s_resp.data:
-                        s_data = s_resp.data[0]
-                        sense_id = s_data.get("id") or sense_id
-                        meaning = s_data.get("meaning_vi") or meaning
-                        ipa = s_data.get("ipa")
-                        def_en = s_data.get("definition_en")
-                        def_vi = s_data.get("definition_vi")
-                        context = s_data.get("example_en")
-                except Exception:
-                    pass
+            s_data = item["sense"]
+            meaning = str(s_data.get("meaning_vi") or "").strip()
+            sense_id = s_data.get("id") or item.get("sense_id")
+            distractors = [
+                candidate
+                for candidate in available_meanings
+                if candidate.casefold() != meaning.casefold()
+            ]
 
             prof = item.get("proficiency", 0.0)
             tasks = cls._build_card_tasks(
@@ -281,22 +286,19 @@ class DynamicGenerator:
                 distractors=distractors,
                 allowed_task_types=allowed_types,
                 proficiency=prof,
-                ipa=ipa,
-                context=context,
-                definition_en=def_en,
-                definition_vi=def_vi
+                definition_en=s_data.get("definition_en")
             )
 
             card = FlashcardCard(
                 id=f"dyn_user_{uuid.uuid4().hex[:8]}",
                 word=word_str,
                 meaning=meaning,
-                ipa=ipa,
-                question=f"Chọn hoặc điền nghĩa chính xác của '{word_str}'",
-                hint=def_vi or def_en or f"Bắt đầu bằng chữ '{word_str[0]}'",
-                context=context,
-                definition_en=def_en,
-                definition_vi=def_vi,
+                ipa=s_data.get("ipa"),
+                question="",
+                hint=s_data.get("definition_vi") or s_data.get("definition_en") or f"Bắt đầu bằng chữ '{word_str[0]}'",
+                context=s_data.get("example_en"),
+                definition_en=s_data.get("definition_en"),
+                definition_vi=s_data.get("definition_vi"),
                 difficulty="medium" if prof >= 0 else "easy",
                 timer=settings.per_card_timer or 15,
                 points=10,
@@ -334,7 +336,7 @@ class DynamicGenerator:
                     for row in senses_res.data:
                         w_obj = row.get("words") or {}
                         w_text = w_obj.get("word_text")
-                        if w_text:
+                        if w_text and str(row.get("meaning_vi") or "").strip():
                             items.append({
                                 "id": row.get("id"),
                                 "word": w_text,
@@ -348,18 +350,15 @@ class DynamicGenerator:
                 logger.warning(f"Error fetching system senses: {e}")
 
         if not items:
-            # Fallback nếu DB trống
-            items = [
-                {"word": "abandon", "meaning_vi": "từ bỏ", "ipa": "/əˈbændən/", "id": "sample_abandon"},
-                {"word": "capable", "meaning_vi": "có khả năng", "ipa": "/ˈkeɪpəbl/", "id": "sample_capable"},
-                {"word": "diversity", "meaning_vi": "sự đa dạng", "ipa": "/daɪˈvɜːrsəti/", "id": "sample_diversity"},
-                {"word": "efficient", "meaning_vi": "hiệu quả", "ipa": "/ɪˈfɪʃnt/", "id": "sample_efficient"},
-                {"word": "flexible", "meaning_vi": "linh hoạt", "ipa": "/ˈfleksəbl/", "id": "sample_flexible"},
-            ]
+            return []
 
         random.shuffle(items)
         selected = items[:total_cards]
-        all_meanings = [it.get("meaning_vi") for it in items if it.get("meaning_vi")]
+        all_meanings = list(dict.fromkeys(
+            str(it.get("meaning_vi") or "").strip()
+            for it in items
+            if str(it.get("meaning_vi") or "").strip()
+        ))
 
         for it in selected:
             word_str = it.get("word") or "word"
@@ -373,10 +372,7 @@ class DynamicGenerator:
                 distractors=distractors,
                 allowed_task_types=allowed_types,
                 proficiency=0.0,
-                ipa=it.get("ipa"),
-                context=it.get("example_en"),
-                definition_en=it.get("definition_en"),
-                definition_vi=it.get("definition_vi")
+                definition_en=it.get("definition_en")
             )
 
             card = FlashcardCard(
@@ -384,7 +380,7 @@ class DynamicGenerator:
                 word=word_str,
                 meaning=meaning,
                 ipa=it.get("ipa"),
-                question=f"Chọn nghĩa đúng của từ '{word_str}'",
+                question="",
                 hint=it.get("definition_en") or f"Chữ cái đầu: {word_str[0]}",
                 context=it.get("example_en"),
                 definition_en=it.get("definition_en"),

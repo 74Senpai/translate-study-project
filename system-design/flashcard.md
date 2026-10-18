@@ -9,6 +9,7 @@
 - Nội dung được AI hỗ trợ tạo theo yêu cầu người dùng.(AI gen)
 - Nội dung được tạo động (Dynamic) từ dữ liệu, kho từ đã lưu của người dùng mỗi lần người dùng sử dụng bộ flashcard. (User data dynamic gen)
 - Nội dung được tạo động từ dữ liệu, kho từ đã lưu của hệ thống mỗi lần người dùng sử dụng (System data dynamic gen)
+- Nếu có câu ví dụ/ngữ cảnh, câu hỏi chọn nghĩa cần dựa trên nghĩa của từ trong chính ngữ cảnh đó.
 
 Lưu ý: Với các phương thức Dynamic, người dùng không tạo nội dung câu hỏi, chỉ cài đặt số lượng câu hỏi, ... setting cho bộ flashcard.
 

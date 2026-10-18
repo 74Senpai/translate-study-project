@@ -548,7 +548,6 @@ export default function FlashcardPlayerPage() {
       setAchievementToasts((prev) => prev.filter((t) => t.id !== id));
     }, toastData.duration || 4500);
   };
-  const [newWordsInSession, setNewWordsInSession] = useState([]); // Array of { word, meaning }
   const [skipCountdown, setSkipCountdown] = useState(3);
   const [canSkipFastCard, setCanSkipFastCard] = useState(false);
 
@@ -802,11 +801,16 @@ export default function FlashcardPlayerPage() {
 
     // 1. Background save immediately
     const payload = {
+      card_id: card.id,
+      set_id: set?.id || id,
       word: card.word,
+      sense_id: card.sense_id || null,
+      user_answer: resultObj.userAnswer,
       task_type: activeTaskType,
       is_correct: correct,
-      meaning: card.meaning || "",
       session_id: sessionId,
+      time_spent: Math.max(0, (card.timer || 15) - timeLeft),
+      time_limit: card.timer || 15,
     };
     axiosInstance
       .post("/flashcards/submit-answer", payload)
@@ -818,58 +822,25 @@ export default function FlashcardPlayerPage() {
           const newResults = [...prev];
           newResults[lastIdx] = {
             ...newResults[lastIdx],
-            current_proficiency: data.proficiency,
-            is_first_encounter: data.is_first_encounter,
-            is_first_fill_correct: data.is_first_fill_correct,
+            current_proficiency: data.new_proficiency,
+            leitner_box: data.leitner_box,
           };
           return newResults;
         });
 
-        if (data.is_first_encounter) {
-          setNewWordsInSession((prev) => {
-            if (
-              prev.some((w) => w.word.toLowerCase() === card.word.toLowerCase())
-            )
-              return prev;
-            return [...prev, { word: card.word, meaning: card.meaning }];
-          });
-
-          // Show "Unlocked" toast immediately
-          addAchievementToast({
-            type: "unlocked",
-            word: card.word,
-            meaning: card.meaning,
-          });
-
-          if (correct) {
-            // Delay the achievement toast slightly so it doesn't overlap perfectly or just show both
-            setTimeout(() => {
-              addAchievementToast({
-                type: "first_encounter",
-                word: card.word,
-                meaning: card.meaning,
-              });
-            }, 800);
-          }
-        }
-
-        if (data.is_first_fill_correct) {
-          addAchievementToast({
-            type: "first_fill",
-            word: card.word,
-            meaning: card.meaning,
-          });
-        }
-
-        if (data?.newly_mastered) {
-          addAchievementToast({
-            type: "mastered",
-            word: card.word,
-            meaning: card.meaning,
-          });
+        if (data.bonus_toast) {
+          addAchievementToast(data.bonus_toast);
         }
       })
-      .catch(() => {
+      .catch((error) => {
+        if (error.response && error.response.status < 500) {
+          console.error(
+            "Flashcard answer submission was rejected:",
+            error.response.data,
+          );
+          return;
+        }
+
         // 2. Fallback to localStorage if offline or network error
         try {
           const queue = JSON.parse(
@@ -1922,6 +1893,25 @@ export default function FlashcardPlayerPage() {
     );
 
   const card = set?.cards?.[currentCardIdx];
+  const customQuestion = card?.question?.trim();
+  const hasCustomQuestion =
+    customQuestion &&
+    customQuestion.toLowerCase() !== (card?.word || "").toLowerCase().trim() &&
+    customQuestion.toLowerCase() !== (card?.meaning || "").toLowerCase().trim();
+  const taskQuestion =
+    activeTaskType === "choice" && card?.context?.trim()
+      ? `Trong câu ví dụ, từ "${card.word}" có nghĩa nào phù hợp nhất?`
+      : activeTaskType === "choice" && hasCustomQuestion
+      ? customQuestion
+      : activeTaskType === "choice"
+        ? `Nghĩa của từ "${card?.word || "..."}" là gì?`
+        : activeTaskType === "fill"
+          ? `Dịch sang ${
+              (card?.word || "").match(/^[a-zA-Z\s]+$/)
+                ? "tiếng Anh"
+                : "tiếng Việt"
+            }: "${card?.meaning || "..."}"`
+          : `Điền chữ cái còn thiếu để hoàn thành từ "${card?.word || "..."}"`;
 
   if (!card && (gameState === "playing" || gameState === "feedback")) {
     return (
@@ -2120,21 +2110,18 @@ export default function FlashcardPlayerPage() {
                       <Volume2 className="w-6 h-6 animate-pulse" />
                       {activeTaskType === "choice" ? "Nghe từ và chọn nghĩa đúng" : "Nghe từ và điền từ tiếng Anh"}
                     </span>
-                  ) : card?.question &&
-                    card.question.trim() !== "" &&
-                    card.question.toLowerCase().trim() !==
-                    (card?.word || "").toLowerCase().trim() &&
-                    card.question.toLowerCase().trim() !==
-                    (card?.meaning || "").toLowerCase().trim()
-                    ? card.question
-                    : activeTaskType === "choice"
-                      ? `Nghĩa của từ "${card?.word || "..."}" là gì?`
-                      : `Dịch sang ${(card?.word || "").match(/^[a-zA-Z\s]+$/) ? "tiếng Anh" : "tiếng Việt"}: "${card?.meaning || "..."}"`}
+                  ) : taskQuestion}
                 </h3>
+
+                {activeTaskType === "choice" && card?.context?.trim() && (
+                  <blockquote className="mx-auto max-w-2xl rounded-2xl border border-indigo-100 bg-indigo-50/60 px-5 py-4 text-left text-base font-semibold leading-relaxed text-slate-700">
+                    {card.context}
+                  </blockquote>
+                )}
 
                 {isAudioMode && (
                   <p className="text-xs font-semibold text-slate-500 bg-slate-50 border border-slate-100 rounded-xl px-4 py-1.5 w-fit mx-auto animate-in fade-in">
-                    Ý nghĩa từ cần tìm: <span className="font-bold text-slate-700">{card?.meaning}</span>
+                    Nghe phát âm và trả lời theo yêu cầu ở trên.
                   </p>
                 )}
 
