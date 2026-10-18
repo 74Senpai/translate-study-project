@@ -102,6 +102,7 @@ def create_app() -> FastAPI:
     app.include_router(admin_router)
     app.include_router(auth_router)   # /auth/callback, /auth/refresh, /auth/me, /auth/logout
     app.include_router(flashcard_router)
+    app.include_router(flashcard_router, prefix="/api/admin")
     app.include_router(router_v2)
 
     # Static file mounting if static folder exists

@@ -1,6 +1,6 @@
 from typing import List, Optional, Dict, Any, Union
 from datetime import datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class SoundConfig(BaseModel):
@@ -21,6 +21,8 @@ class LeitnerConfig(BaseModel):
 
 
 class FlashcardSettings(BaseModel):
+    model_config = {"extra": "ignore"}
+
     total_cards: int = 20
     difficulty_distribution: Dict[str, int] = Field(default={"easy": 5, "medium": 10, "hard": 5})
     allowed_task_types: List[str] = Field(
@@ -36,6 +38,55 @@ class FlashcardSettings(BaseModel):
     event_end_at: Optional[str] = Field(default=None, description="Thời gian đóng bộ thẻ (ISO format)")
     sound_config: Optional[Dict[str, Any]] = None
     leitner_config: Optional[LeitnerConfig] = None
+
+    @field_validator("daily_limit", mode="before")
+    @classmethod
+    def parse_daily_limit(cls, v):
+        if v is None or v == "":
+            return 0
+        try:
+            return int(v)
+        except (ValueError, TypeError):
+            return 0
+
+    @field_validator("total_cards", mode="before")
+    @classmethod
+    def parse_total_cards(cls, v):
+        if v is None or v == "":
+            return 20
+        try:
+            return max(1, int(v))
+        except (ValueError, TypeError):
+            return 20
+
+    @field_validator("per_card_timer", mode="before")
+    @classmethod
+    def parse_per_card_timer(cls, v):
+        if v is None or v == "":
+            return 15
+        try:
+            return max(1, int(v))
+        except (ValueError, TypeError):
+            return 15
+
+    @field_validator("total_time_limit", mode="before")
+    @classmethod
+    def parse_total_time_limit(cls, v):
+        if v is None or v == "":
+            return None
+        try:
+            val = int(v)
+            return val if val > 0 else None
+        except (ValueError, TypeError):
+            return None
+
+    @field_validator("event_start_at", "event_end_at", mode="before")
+    @classmethod
+    def parse_event_dates(cls, v):
+        if not v or str(v).strip() == "":
+            return None
+        return str(v).strip()
+
 
 
 class ChoiceOption(BaseModel):
@@ -78,6 +129,8 @@ class FlashcardTasks(BaseModel):
 
 
 class FlashcardCard(BaseModel):
+    model_config = {"extra": "ignore"}
+
     id: str
     word: str
     meaning: str
@@ -99,12 +152,54 @@ class FlashcardCard(BaseModel):
     user_attempts: Optional[int] = None
     leitner_box: Optional[int] = 1
 
+    @field_validator("difficulty", mode="before")
+    @classmethod
+    def parse_difficulty(cls, v):
+        if not v:
+            return "medium"
+        d = str(v).strip().lower()
+        return d if d in ("easy", "medium", "hard") else "medium"
+
+    @field_validator("timer", mode="before")
+    @classmethod
+    def parse_timer(cls, v):
+        if v is None or v == "":
+            return 15
+        try:
+            val = int(v)
+            return max(1, val)
+        except (ValueError, TypeError):
+            return 15
+
+    @field_validator("points", mode="before")
+    @classmethod
+    def parse_points(cls, v):
+        if v is None or v == "":
+            return 10
+        try:
+            val = int(v)
+            return max(0, val)
+        except (ValueError, TypeError):
+            return 10
+
+    @field_validator("sense_id", mode="before")
+    @classmethod
+    def parse_sense_id(cls, v):
+        if not v or str(v).strip() == "":
+            return None
+        return str(v).strip()
+
 
 class FlashcardSetCreate(BaseModel):
+    model_config = {"extra": "ignore"}
+
+    id: Optional[str] = None
     title: str
     description: Optional[str] = ""
     is_public: bool = False
+    is_dynamic: Optional[bool] = None
     set_type: str = Field(default="manual", description="manual, ai_gen, user_dynamic, system_dynamic")
+    creator_id: Optional[str] = None
     invite_code: Optional[str] = None
     allowed_user_ids: List[str] = []
     settings: Optional[FlashcardSettings] = None
@@ -112,10 +207,14 @@ class FlashcardSetCreate(BaseModel):
 
 
 class FlashcardSetUpdate(BaseModel):
+    model_config = {"extra": "ignore"}
+
     title: Optional[str] = None
     description: Optional[str] = None
     is_public: Optional[bool] = None
+    is_dynamic: Optional[bool] = None
     set_type: Optional[str] = None
+    creator_id: Optional[str] = None
     invite_code: Optional[str] = None
     allowed_user_ids: Optional[List[str]] = None
     settings: Optional[FlashcardSettings] = None
@@ -202,3 +301,64 @@ class AIGenerateRequest(BaseModel):
 
 class JoinPrivateSetRequest(BaseModel):
     invite_code: str
+
+
+class RepetitionLoopItem(BaseModel):
+    id: Optional[int] = None
+    loop_order: int = Field(description="Thứ tự box trong hệ thống Leitner")
+    day_repetition: int = Field(description="Khoảng cách ngày ôn tập")
+    pre_loop_id: Optional[int] = None
+    next_loop_id: Optional[int] = None
+
+
+class RepetitionScheduleResponse(BaseModel):
+    total_boxes: int
+    boxes: List[int]
+    loops: List[RepetitionLoopItem]
+
+
+class UpdateRepetitionScheduleRequest(BaseModel):
+    boxes: List[int] = Field(
+        min_length=1,
+        description="Danh sách khoảng cách ngày ôn tập giữa các box, ví dụ: [1, 2, 5, 8, 14]"
+    )
+
+
+class FlashcardInitRequest(BaseModel):
+    mode: str = Field(
+        default="system_dynamic",
+        description="Chế độ khởi tạo: 'system_dynamic', 'user_dynamic', 'default_seed', 'manual'"
+    )
+    title: Optional[str] = None
+    description: Optional[str] = None
+    is_public: bool = True
+    total_cards: int = 20
+    difficulty: str = "medium"
+    allowed_task_types: Optional[List[str]] = Field(
+        default=None,
+        description="Các dạng bài tập cho phép: choice, fill, complete, listen_choice, listen_write, def_choice, def_write, context_def_vi, context_def_en"
+    )
+    time_limit_mode: str = "per_card"
+    per_card_timer: int = 15
+    daily_limit: int = 5
+    reset_time: str = "07:00"
+    event_start_at: Optional[str] = None
+    event_end_at: Optional[str] = None
+    leitner_config: Optional[LeitnerConfig] = None
+    use_db_spaced_repetition: bool = Field(
+        default=True,
+        description="Sử dụng cấu hình space repetition từ database (repetition_loops)"
+    )
+
+
+class DictionaryCacheItem(BaseModel):
+    id: str
+    word: str
+    meaning_vi: str
+    ipa: Optional[str] = None
+    part_of_speech: Optional[str] = None
+    definition_en: Optional[str] = None
+    definition_vi: Optional[str] = None
+    example_en: Optional[str] = None
+    audio_url: Optional[str] = None
+

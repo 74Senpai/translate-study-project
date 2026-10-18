@@ -56,6 +56,7 @@ class Settings(BaseSettings):
     supabase_url: str = ""
     supabase_anon_key: str = ""
     supabase_service_key: str = ""
+    admin_emails: List[str] = []
 
     # Google OAuth
     WEB_CLIENT_ID: str = ""

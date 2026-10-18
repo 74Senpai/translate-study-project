@@ -24,7 +24,6 @@ import {
   BookOpen,
   Volume2,
   ChevronDown,
-  Zap,
 } from "lucide-react";
 import axiosInstance from "@/services/axiosInstance";
 
@@ -495,10 +494,15 @@ export default function FlashcardEditor() {
     title: "",
     description: "",
     is_public: false,
+    set_type: "manual",
+    is_dynamic: false,
     settings: {
       total_cards: 20,
       difficulty_distribution: { easy: 5, medium: 10, hard: 5 },
       allowed_task_types: ["choice", "fill", "complete"],
+      time_limit_mode: "per_card",
+      per_card_timer: 15,
+      total_time_limit: null,
       daily_limit: 5,
       reset_time: "07:00",
       event_start_at: null,
@@ -551,11 +555,20 @@ export default function FlashcardEditor() {
         if (!data.settings.reset_time) {
           data.settings.reset_time = "07:00";
         }
+        if (data.settings.per_card_timer == null) {
+          data.settings.per_card_timer = 15;
+        }
+        if (!data.settings.time_limit_mode) {
+          data.settings.time_limit_mode = "per_card";
+        }
       } else {
         data.settings = {
           total_cards: 20,
           difficulty_distribution: { easy: 5, medium: 10, hard: 5 },
           allowed_task_types: ["choice", "fill", "complete"],
+          time_limit_mode: "per_card",
+          per_card_timer: 15,
+          total_time_limit: null,
           daily_limit: 5,
           reset_time: "07:00",
           event_start_at: null,
@@ -1207,14 +1220,25 @@ export default function FlashcardEditor() {
 
     try {
       setSaving(true);
+      // Ensure per_card_timer and time_limit_mode are always set
+      const payload = {
+        ...setInfo,
+        settings: {
+          ...setInfo.settings,
+          per_card_timer: setInfo.settings?.per_card_timer ?? 15,
+          time_limit_mode: setInfo.settings?.time_limit_mode ?? "per_card",
+        },
+      };
       if (id && id !== "new") {
-        await axiosInstance.put(`/flashcards/${id}`, setInfo);
+        await axiosInstance.put(`/flashcards/${id}`, payload);
       } else {
-        await axiosInstance.post("/flashcards", setInfo);
+        await axiosInstance.post("/flashcards", payload);
       }
+      showToast("Lưu thành công!", "success");
       navigate("/admin/flashcards");
-    } catch {
-      showToast("Failed to save flashcard set", "error");
+    } catch (err) {
+      const detail = err?.response?.data?.detail || err?.message || "Failed to save flashcard set";
+      showToast(typeof detail === "string" ? detail : JSON.stringify(detail), "error");
     } finally {
       setSaving(false);
     }
@@ -1543,55 +1567,55 @@ export default function FlashcardEditor() {
               </div>
             </div>
 
-            {/* Dynamic Mode Toggle */}
-            <div className="p-6 bg-indigo-50/50 rounded-[2.5rem] border border-indigo-100/50 space-y-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all ${setInfo.is_dynamic ? "bg-indigo-600 text-white shadow-lg shadow-indigo-200" : "bg-white text-slate-400 border border-slate-200"}`}>
-                    <Zap className={`w-5 h-5 ${setInfo.is_dynamic ? "animate-pulse" : ""}`} />
-                  </div>
-                  <div>
-                    <h4 className="text-sm font-black text-slate-800 tracking-tight">Dynamic User Mode</h4>
-                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Generate cards from user data</p>
-                  </div>
+            {/* Per-card Timer Settings */}
+            <div className="space-y-3 pt-2">
+              <label className="text-[11px] font-black text-slate-500 uppercase tracking-[0.2em] ml-1">
+                Cấu hình Thời gian (Timer)
+              </label>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 group hover:border-indigo-200 transition-all">
+                  <span className="text-[9px] font-black text-slate-400 uppercase block mb-1">
+                    Giây / thẻ
+                  </span>
+                  <input
+                    type="number"
+                    min="5"
+                    max="120"
+                    value={setInfo.settings?.per_card_timer ?? 15}
+                    onChange={(e) =>
+                      setSetInfo({
+                        ...setInfo,
+                        settings: {
+                          ...setInfo.settings,
+                          per_card_timer: parseInt(e.target.value) || 15,
+                        },
+                      })
+                    }
+                    className="w-full bg-transparent border-none outline-none font-black text-xl text-slate-800"
+                  />
                 </div>
-                <button
-                  onClick={() => setSetInfo({ ...setInfo, is_dynamic: !setInfo.is_dynamic })}
-                  className={`w-12 h-6 rounded-full transition-all relative ${setInfo.is_dynamic ? "bg-indigo-600" : "bg-slate-200"}`}
-                >
-                  <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${setInfo.is_dynamic ? "left-7 shadow-sm" : "left-1"}`} />
-                </button>
+                <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 group hover:border-indigo-200 transition-all">
+                  <span className="text-[9px] font-black text-slate-400 uppercase block mb-2">
+                    Chế độ timer
+                  </span>
+                  <select
+                    value={setInfo.settings?.time_limit_mode || "per_card"}
+                    onChange={(e) =>
+                      setSetInfo({
+                        ...setInfo,
+                        settings: {
+                          ...setInfo.settings,
+                          time_limit_mode: e.target.value,
+                        },
+                      })
+                    }
+                    className="w-full bg-transparent border-none outline-none font-black text-sm text-slate-800 cursor-pointer"
+                  >
+                    <option value="per_card">Mỗi thẻ</option>
+                    <option value="total">Tổng cả bộ</option>
+                  </select>
+                </div>
               </div>
-
-              {setInfo.is_dynamic && (
-                <div className="space-y-4 pt-2 animate-in fade-in slide-in-from-top-2 duration-300">
-                  <div className="space-y-2">
-                    <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest ml-1">Vocabulary Source</label>
-                    <div className="grid grid-cols-2 gap-2">
-                      {[
-                        { id: "saved", label: "Saved Words" },
-                        { id: "flashcard", label: "History Card" },
-                        { id: "translated", label: "Translation" },
-                        { id: "mix", label: "Mix All" }
-                      ].map((source) => (
-                        <button
-                          key={source.id}
-                          onClick={() => setSetInfo({
-                            ...setInfo,
-                            settings: {
-                              ...setInfo.settings,
-                              dynamic_source: source.id
-                            }
-                          })}
-                          className={`px-3 py-2 rounded-xl border-2 text-[10px] font-black uppercase transition-all ${setInfo.settings?.dynamic_source === source.id ? "bg-white border-indigo-500 text-indigo-600 shadow-sm" : "bg-white/50 border-transparent text-slate-400 hover:bg-white"}`}
-                        >
-                          {source.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              )}
             </div>
 
             <div className="space-y-3">
@@ -1870,7 +1894,7 @@ export default function FlashcardEditor() {
                 </p>
                 <p className="text-[10px] text-indigo-600 font-bold leading-normal">
                   ✓ Không cần nhập thủ công câu hỏi hay danh sách thẻ.<br/>
-                  ✓ Cấu hình thẻ chơi mỗi lượt bằng input "Cards per Play" bên trái.
+                  ✓ Cấu hình thẻ chơi mỗi lượt bằng input &quot;Cards per Play&quot; bên trái.
                 </p>
               </div>
             )}

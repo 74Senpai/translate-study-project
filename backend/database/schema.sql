@@ -298,3 +298,229 @@ CREATE INDEX IF NOT EXISTS idx_user_sense_attempts_user_created
 
 CREATE INDEX IF NOT EXISTS idx_user_sense_attempts_sense_created
     ON public.user_sense_attempts(sense_id, created_at DESC);
+
+
+-- =========================================================
+-- 13. Default seed for Repetition schedule (Leitner Space Repetition)
+-- Boxes 1 to 5 corresponding to review intervals: 1, 2, 5, 8, 14 days
+-- =========================================================
+INSERT INTO public.repetition_loops (loop_order, day_repetition)
+VALUES 
+    (1, 1),
+    (2, 2),
+    (3, 5),
+    (4, 8),
+    (5, 14)
+ON CONFLICT (loop_order) DO UPDATE
+SET day_repetition = EXCLUDED.day_repetition;
+
+UPDATE public.repetition_loops AS cur
+SET 
+    pre_loop_id = p.id,
+    next_loop_id = n.id
+FROM public.repetition_loops AS c
+LEFT JOIN public.repetition_loops AS p ON p.loop_order = c.loop_order - 1
+LEFT JOIN public.repetition_loops AS n ON n.loop_order = c.loop_order + 1
+WHERE cur.id = c.id;
+
+
+-- =========================================================
+-- 14. Flashcard Sets (Bộ thẻ ghi nhớ)
+-- Follows system-design/flashcard.md:
+-- - Public / Private (với mã mời hoặc danh sách người dùng được phép)
+-- - Set types: manual, ai_gen, user_dynamic, system_dynamic
+-- - Settings: tổng số thẻ, timer per_card/total, daily_limit, reset_time (07:00),
+--             khung giờ event_start_at / event_end_at, leitner_config, v.v.
+-- =========================================================
+CREATE TABLE IF NOT EXISTS public.flashcard_sets (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    title VARCHAR(255) NOT NULL,
+    description TEXT DEFAULT '',
+    is_public BOOLEAN NOT NULL DEFAULT TRUE,
+    set_type VARCHAR(50) NOT NULL DEFAULT 'manual'
+        CHECK (set_type IN ('manual', 'ai_gen', 'user_dynamic', 'system_dynamic')),
+    creator_id UUID REFERENCES public.profiles(id) ON DELETE SET NULL,
+    invite_code VARCHAR(50) UNIQUE,
+    settings JSONB NOT NULL DEFAULT '{
+        "total_cards": 20,
+        "difficulty_distribution": {"easy": 5, "medium": 10, "hard": 5},
+        "allowed_task_types": ["choice", "fill", "complete"],
+        "time_limit_mode": "per_card",
+        "per_card_timer": 15,
+        "daily_limit": 5,
+        "reset_time": "07:00"
+    }'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_flashcard_sets_creator
+    ON public.flashcard_sets(creator_id);
+
+CREATE INDEX IF NOT EXISTS idx_flashcard_sets_public
+    ON public.flashcard_sets(is_public);
+
+CREATE INDEX IF NOT EXISTS idx_flashcard_sets_type
+    ON public.flashcard_sets(set_type);
+
+CREATE INDEX IF NOT EXISTS idx_flashcard_sets_invite_code
+    ON public.flashcard_sets(invite_code)
+    WHERE invite_code IS NOT NULL;
+
+
+-- =========================================================
+-- 15. Flashcard Set Members / Allowed Users (Bộ thẻ riêng tư - Private)
+-- Chỉ người tạo, người được mời hoặc người nhập mã mời mới có quyền tham gia.
+-- =========================================================
+CREATE TABLE IF NOT EXISTS public.flashcard_set_members (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    set_id UUID NOT NULL
+        REFERENCES public.flashcard_sets(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL
+        REFERENCES public.profiles(id) ON DELETE CASCADE,
+    role VARCHAR(50) NOT NULL DEFAULT 'member'
+        CHECK (role IN ('owner', 'editor', 'member')),
+    joined_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    UNIQUE (set_id, user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_flashcard_set_members_user
+    ON public.flashcard_set_members(user_id);
+
+CREATE INDEX IF NOT EXISTS idx_flashcard_set_members_set
+    ON public.flashcard_set_members(set_id);
+
+
+-- =========================================================
+-- 16. Flashcard Cards (Thẻ từ vựng cho manual & ai_gen)
+-- Chứa nội dung bài tập: trắc nghiệm, điền từ, hoàn thành từ, nghe, định nghĩa.
+-- =========================================================
+CREATE TABLE IF NOT EXISTS public.flashcard_cards (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    set_id UUID NOT NULL
+        REFERENCES public.flashcard_sets(id) ON DELETE CASCADE,
+    word VARCHAR(255) NOT NULL,
+    meaning VARCHAR(255) NOT NULL,
+    ipa VARCHAR(255),
+    audio_url TEXT,
+    question TEXT DEFAULT '',
+    hint TEXT DEFAULT '',
+    context TEXT,
+    definition_en TEXT,
+    definition_vi TEXT,
+    feedback_correct TEXT DEFAULT 'Great job!',
+    feedback_incorrect TEXT DEFAULT 'Try again!',
+    difficulty VARCHAR(20) NOT NULL DEFAULT 'medium'
+        CHECK (difficulty IN ('easy', 'medium', 'hard')),
+    timer INTEGER NOT NULL DEFAULT 15 CHECK (timer > 0),
+    points INTEGER NOT NULL DEFAULT 10 CHECK (points >= 0),
+    card_order INTEGER NOT NULL DEFAULT 0,
+    tasks JSONB NOT NULL DEFAULT '{}'::jsonb,
+    sense_id TEXT REFERENCES public.senses(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_flashcard_cards_set_id
+    ON public.flashcard_cards(set_id);
+
+CREATE INDEX IF NOT EXISTS idx_flashcard_cards_word_lower
+    ON public.flashcard_cards(LOWER(word));
+
+CREATE INDEX IF NOT EXISTS idx_flashcard_cards_sense_id
+    ON public.flashcard_cards(sense_id);
+
+
+-- =========================================================
+-- 17. Flashcard Daily Usage (Giới hạn lượt làm hàng ngày)
+-- Ghi nhận số lượt làm thẻ mỗi ngày theo reset_time (mặc định 07:00 sáng)
+-- =========================================================
+CREATE TABLE IF NOT EXISTS public.flashcard_daily_usage (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL
+        REFERENCES public.profiles(id) ON DELETE CASCADE,
+    set_id UUID NOT NULL
+        REFERENCES public.flashcard_sets(id) ON DELETE CASCADE,
+    date_key VARCHAR(20) NOT NULL,
+    play_count INTEGER NOT NULL DEFAULT 0 CHECK (play_count >= 0),
+    last_played_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    UNIQUE (user_id, set_id, date_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_flashcard_daily_usage_lookup
+    ON public.flashcard_daily_usage(user_id, set_id, date_key);
+
+
+-- =========================================================
+-- 18. Flashcard Sessions (Lịch sử & trạng thái phiên học)
+-- =========================================================
+CREATE TABLE IF NOT EXISTS public.flashcard_sessions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    session_id VARCHAR(100) NOT NULL UNIQUE,
+    set_id UUID NOT NULL
+        REFERENCES public.flashcard_sets(id) ON DELETE CASCADE,
+    user_id UUID
+        REFERENCES public.profiles(id) ON DELETE SET NULL,
+    is_guest BOOLEAN NOT NULL DEFAULT FALSE,
+    score INTEGER NOT NULL DEFAULT 0,
+    streak INTEGER NOT NULL DEFAULT 0,
+    total_cards INTEGER NOT NULL DEFAULT 0,
+    cards_reviewed INTEGER NOT NULL DEFAULT 0,
+    correct_count INTEGER NOT NULL DEFAULT 0,
+    accuracy_rate REAL NOT NULL DEFAULT 0,
+    is_completed BOOLEAN NOT NULL DEFAULT FALSE,
+    started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    completed_at TIMESTAMPTZ,
+    results JSONB DEFAULT '[]'::jsonb
+);
+
+CREATE INDEX IF NOT EXISTS idx_flashcard_sessions_user
+    ON public.flashcard_sessions(user_id);
+
+CREATE INDEX IF NOT EXISTS idx_flashcard_sessions_set
+    ON public.flashcard_sessions(set_id);
+
+
+-- =========================================================
+-- 19. User Word Statistics (Thống kê số lần gặp & số lần dịch của từ theo user)
+-- Phục vụ chấm điểm trừ khi trả lời sai (gặp/dịch càng nhiều trừ càng ít)
+-- và ưu tiên bài học Leitner dynamic (dịch nhiều/ít nhất, gặp nhiều/ít nhất)
+-- =========================================================
+CREATE TABLE IF NOT EXISTS public.user_word_statistics (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL
+        REFERENCES public.profiles(id) ON DELETE CASCADE,
+    word VARCHAR(255) NOT NULL,
+    encountered_count INTEGER NOT NULL DEFAULT 0 CHECK (encountered_count >= 0),
+    translated_count INTEGER NOT NULL DEFAULT 0 CHECK (translated_count >= 0),
+    total_count INTEGER NOT NULL DEFAULT 0 CHECK (total_count >= 0),
+    last_seen TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    UNIQUE (user_id, word)
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_word_statistics_user_word
+    ON public.user_word_statistics(user_id, LOWER(word));
+
+
+-- =========================================================
+-- 20. Helper RPC: increment_sense_match
+-- Tăng match_count cho tất cả senses của một từ tiếng Anh xuất hiện
+-- =========================================================
+CREATE OR REPLACE FUNCTION public.increment_sense_match(p_word TEXT)
+RETURNS VOID AS $$
+BEGIN
+    UPDATE public.senses s
+    SET match_count = s.match_count + 1,
+        updated_at = NOW()
+    FROM public.words w
+    WHERE s.word_id = w.id
+      AND LOWER(w.word_text) = LOWER(p_word);
+END;
+$$ LANGUAGE plpgsql;

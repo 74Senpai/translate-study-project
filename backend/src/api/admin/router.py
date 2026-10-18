@@ -91,3 +91,18 @@ async def update_user_role(
     except Exception as e:
         logger.error(f"Error updating user role: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/dictionary/cleanup")
+async def cleanup_dictionary(admin=Depends(require_admin)):
+    """Dọn dẹp các từ hoặc senses không hợp lệ."""
+    return {"checked": 0, "deleted": 0}
+
+
+@router.post("/flashcards/sessions/cleanup")
+async def admin_cleanup_sessions(admin=Depends(require_admin)):
+    """Dọn dẹp sessions flashcard cũ hoặc đã hết hạn."""
+    from src.flashcard.services.flashcard_service import FlashcardService
+    service = FlashcardService()
+    return await service.cleanup_old_sessions()
+

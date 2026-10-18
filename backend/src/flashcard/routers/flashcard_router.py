@@ -14,12 +14,58 @@ from src.flashcard.models.flashcard_models import (
     AIGenerateRequest,
     JoinPrivateSetRequest,
     FlashcardCard,
+    FlashcardInitRequest,
+    RepetitionScheduleResponse,
+    UpdateRepetitionScheduleRequest,
 )
 from src.flashcard.services.flashcard_service import FlashcardService
 from src.middleware.auth import get_current_user, get_optional_current_user
 
 router = APIRouter(prefix="/flashcards", tags=["flashcards"])
 service = FlashcardService()
+
+
+# ── FLASHCARD INITIALIZATION & CONFIGURATION ────────────────────────────────
+
+@router.post("/initialize", response_model=Dict[str, Any])
+@router.post("/init", response_model=Dict[str, Any])
+async def initialize_flashcard(
+    data: FlashcardInitRequest,
+    user: Optional[dict] = Depends(get_optional_current_user)
+):
+    """
+    Khởi tạo bộ flashcard (hỗ trợ system_dynamic, user_dynamic, default_seed, manual):
+    - Tự động tích hợp cấu hình Space Repetition từ database (bảng repetition_loops).
+    - Cấu hình số lượng card, thời gian làm bài, phân cấp dạng câu hỏi theo ngưỡng thông thạo.
+    """
+    user_id = user.get("sub") if user else None
+    return await service.initialize_flashcard(data, creator_id=user_id)
+
+
+@router.get("/repetition-config", response_model=RepetitionScheduleResponse)
+async def get_repetition_config():
+    """Lấy danh sách các box và khoảng cách ngày ôn tập theo thuật toán Leitner Space Repetition trong database."""
+    return await service.get_repetition_config()
+
+
+@router.put("/repetition-config", response_model=RepetitionScheduleResponse)
+async def update_repetition_config(
+    data: UpdateRepetitionScheduleRequest,
+    user: Optional[dict] = Depends(get_optional_current_user)
+):
+    """Điều chỉnh lại cấu hình khoảng cách ngày ôn tập (day_repetition) của các box trong database."""
+    return await service.update_repetition_config(data)
+
+
+@router.get("/dictionary-cache", response_model=List[Dict[str, Any]])
+async def get_dictionary_cache(
+    limit: int = 200,
+    src: Optional[str] = None,
+    dest: Optional[str] = None,
+    user: Optional[dict] = Depends(get_optional_current_user)
+):
+    """Lấy danh sách từ vựng & senses từ database để phục vụ khởi tạo / import thẻ flashcard."""
+    return await service.get_dictionary_cache(limit=limit, src=src, dest=dest)
 
 
 # ── FLASHCARD SET MANAGEMENT ─────────────────────────────────────────────────
@@ -59,7 +105,9 @@ async def update_flashcard_set(
 ):
     """Cập nhật bộ flashcard."""
     user_id = user.get("sub") if user else None
-    return await service.update_set(set_id, data, user_id=user_id)
+    role = (user.get("role") or user.get("user_metadata", {}).get("role") or "") if user else ""
+    is_admin = role.upper() == "ADMIN"
+    return await service.update_set(set_id, data, user_id=user_id, is_admin=is_admin)
 
 
 @router.delete("/{set_id}")
@@ -69,7 +117,9 @@ async def delete_flashcard_set(
 ):
     """Xóa bộ flashcard."""
     user_id = user.get("sub") if user else None
-    return await service.delete_set(set_id, user_id=user_id)
+    role = (user.get("role") or user.get("user_metadata", {}).get("role") or "") if user else ""
+    is_admin = role.upper() == "ADMIN"
+    return await service.delete_set(set_id, user_id=user_id, is_admin=is_admin)
 
 
 @router.post("/join-private")
@@ -171,3 +221,10 @@ async def generate_ai_cards(
 ):
     """Sinh bộ thẻ flashcard bằng AI theo chủ đề, độ khó và dạng bài."""
     return await service.generate_ai_cards(req)
+
+
+@router.post("/sessions/cleanup")
+async def cleanup_sessions(user: Optional[dict] = Depends(get_optional_current_user)):
+    """Dọn dẹp các phiên học flashcard cũ."""
+    return await service.cleanup_old_sessions()
+

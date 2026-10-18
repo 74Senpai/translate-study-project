@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
@@ -16,6 +17,11 @@ from src.flashcard.models.flashcard_models import (
     AIGenerateRequest,
     FlashcardCard,
     FlashcardSettings,
+    FlashcardInitRequest,
+    RepetitionScheduleResponse,
+    UpdateRepetitionScheduleRequest,
+    RepetitionLoopItem,
+    LeitnerConfig,
 )
 from src.flashcard.repositories.flashcard_repository import FlashcardRepository
 from src.flashcard.engines.scoring_engine import ScoringEngine
@@ -67,39 +73,131 @@ class FlashcardService:
 
         return card_set
 
+    async def initialize_flashcard(
+        self,
+        req: FlashcardInitRequest,
+        creator_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Khởi tạo bộ flashcard theo các chế độ (system_dynamic, user_dynamic, default_seed, manual):
+        - Tự động lấy cấu hình khoảng cách box ôn tập từ repetition_loops trong database
+        - Thiết lập cài đặt thời gian, số lượng câu, dạng câu hỏi phù hợp
+        - Lưu trữ đồng bộ vào database
+        """
+        # 1. Lấy cấu hình space repetition từ bảng repetition_loops trong database
+        loops = await self.repo.get_repetition_loops()
+        db_boxes = [l["day_repetition"] for l in loops]
+
+        leitner_cfg = req.leitner_config or LeitnerConfig()
+        if req.use_db_spaced_repetition or not leitner_cfg.boxes:
+            leitner_cfg.boxes = db_boxes
+
+        mode = req.mode.lower()
+        title = req.title
+        description = req.description or ""
+        set_type = "manual"
+        is_dynamic = False
+        cards: List[FlashcardCard] = []
+
+        if mode == "system_dynamic":
+            set_type = "system_dynamic"
+            is_dynamic = True
+            title = title or "Bộ Thẻ Ôn Tập Hệ Thống (System Dynamic Leitner)"
+            description = description or "Bộ thẻ tạo câu hỏi động từ kho từ vựng toàn hệ thống, tự động điều chỉnh theo thuật toán Leitner Space Repetition."
+        elif mode == "user_dynamic":
+            set_type = "user_dynamic"
+            is_dynamic = True
+            title = title or "Bộ Thẻ Cá Nhân Hóa (User Data Leitner SRS)"
+            description = description or "Bộ thẻ tạo câu hỏi động từ kho từ vựng và lịch sử dịch của bạn, tự động ưu tiên ôn tập theo Leitner Box."
+        elif mode == "default_seed":
+            # Khởi tạo bộ thẻ mẫu cơ bản
+            return await self._seed_default_set()
+        else:
+            set_type = "manual"
+            is_dynamic = False
+            title = title or "Bộ Flashcard Tự Chọn"
+            description = description or "Bộ thẻ flashcard tự nhập liệu nội dung từ vựng."
+
+        settings = FlashcardSettings(
+            total_cards=req.total_cards,
+            allowed_task_types=req.allowed_task_types or ["choice", "fill", "complete"],
+            time_limit_mode=req.time_limit_mode,
+            per_card_timer=req.per_card_timer,
+            daily_limit=req.daily_limit,
+            reset_time=req.reset_time,
+            event_start_at=req.event_start_at,
+            event_end_at=req.event_end_at,
+            leitner_config=leitner_cfg
+        )
+
+        create_data = FlashcardSetCreate(
+            title=title,
+            description=description,
+            is_public=req.is_public,
+            set_type=set_type,
+            settings=settings,
+            cards=cards
+        )
+        return await self.create_set(create_data, creator_id=creator_id)
+
     async def create_set(self, data: FlashcardSetCreate, creator_id: Optional[str] = None) -> Dict[str, Any]:
-        """Tạo mới một bộ flashcard."""
+        """Tạo mới một bộ flashcard (tích hợp cấu hình Space Repetition từ database)."""
         payload = data.model_dump()
         
         # Nếu là bộ dynamic, đánh dấu cờ phù hợp
         if data.set_type in ("user_dynamic", "system_dynamic"):
             payload["is_dynamic"] = True
 
+        # Tự động đồng bộ cấu hình spaced repetition từ database nếu chưa có hoặc dùng mặc định
+        loops = await self.repo.get_repetition_loops()
+        db_boxes = [l["day_repetition"] for l in loops]
+
+        if not payload.get("settings"):
+            payload["settings"] = FlashcardSettings(
+                leitner_config=LeitnerConfig(boxes=db_boxes)
+            ).model_dump()
+        else:
+            st = payload["settings"]
+            l_cfg = st.get("leitner_config")
+            if not l_cfg:
+                st["leitner_config"] = LeitnerConfig(boxes=db_boxes).model_dump()
+            elif not l_cfg.get("boxes"):
+                l_cfg["boxes"] = db_boxes
+
         created = await self.repo.create_set(payload, creator_id=creator_id)
         return created
 
-    async def update_set(self, set_id: str, data: FlashcardSetUpdate, user_id: Optional[str] = None) -> Dict[str, Any]:
-        """Cập nhật bộ flashcard (chỉ người tạo mới có quyền)."""
+    async def update_set(
+        self,
+        set_id: str,
+        data: FlashcardSetUpdate,
+        user_id: Optional[str] = None,
+        is_admin: bool = False
+    ) -> Dict[str, Any]:
+        """Cập nhật bộ flashcard."""
         existing = await self.get_set_by_id(set_id, user_id=user_id)
         creator = existing.get("creator_id")
-        if creator and user_id and creator != user_id:
-            raise HTTPException(status_code=403, detail="Chỉ người tạo mới có quyền chỉnh sửa bộ thẻ này.")
+        if not is_admin and creator and user_id and creator != user_id:
+            raise HTTPException(status_code=403, detail="Chỉ người tạo hoặc quản trị viên mới có quyền chỉnh sửa bộ thẻ này.")
 
         updated = await self.repo.update_set(set_id, data.model_dump(exclude_unset=True))
         if not updated:
-            raise HTTPException(status_code=400, detail="Không thể cập nhật bộ thẻ.")
+            updated = await self.get_set_by_id(set_id)
         return updated
 
-    async def delete_set(self, set_id: str, user_id: Optional[str] = None) -> Dict[str, Any]:
+    async def delete_set(
+        self,
+        set_id: str,
+        user_id: Optional[str] = None,
+        is_admin: bool = False
+    ) -> Dict[str, Any]:
         """Xóa bộ flashcard."""
         existing = await self.get_set_by_id(set_id, user_id=user_id)
         creator = existing.get("creator_id")
-        if creator and user_id and creator != user_id:
-            raise HTTPException(status_code=403, detail="Chỉ người tạo mới có quyền xóa bộ thẻ này.")
+        if not is_admin and creator and user_id and creator != user_id:
+            raise HTTPException(status_code=403, detail="Chỉ người tạo hoặc quản trị viên mới có quyền xóa bộ thẻ này.")
 
-        success = await self.repo.delete_set(set_id)
-        if not success:
-            raise HTTPException(status_code=400, detail="Xóa bộ thẻ thất bại.")
+        await self.repo.delete_set(set_id)
         return {"status": "success", "message": "Đã xóa bộ flashcard thành công."}
 
     async def join_private_set(self, invite_code: str, user_id: str) -> Dict[str, Any]:
@@ -209,8 +307,7 @@ class FlashcardService:
             cards = await DynamicGenerator.generate_user_dynamic_cards(
                 user_id=user_id,
                 settings=settings,
-                supabase_client=self.repo.supabase,
-                mongo_db=self.repo.db
+                supabase_client=self.repo.supabase
             )
         elif set_type == "system_dynamic":
             cards = await DynamicGenerator.generate_system_dynamic_cards(
@@ -227,20 +324,21 @@ class FlashcardService:
             raise HTTPException(status_code=400, detail="Bộ thẻ hiện chưa có từ vựng nào để luyện tập.")
 
         # 3. Đồng bộ điểm thông thạo & ghi nhận từ tiếng Anh theo Spec Mục 4
-        for card in cards:
-            # Ghi nhận từ vựng tiếng Anh
-            await self.repo.record_english_words_exposure(
-                user_id=user_id,
-                text=f"{card.word} {card.question or ''} {card.context or ''}"
-            )
-            # Gắn điểm thông thạo hiện tại của user vào card
-            if user_id:
-                prof_data = await self.repo.get_user_word_proficiency(user_id, card.word)
-                card.user_proficiency = prof_data["proficiency"]
-                card.user_attempts = prof_data["attempts"]
-                card.leitner_box = prof_data["leitner_box"]
+        if user_id:
+            # Ghi nhận từ vựng trong background để không làm chậm khởi động bài học
+            target_words = [c.word for c in cards if c.word]
+            asyncio.create_task(self._record_words_background(user_id, target_words))
 
-        # 4. Khởi tạo session trong MongoDB
+            for card in cards:
+                try:
+                    prof_data = await self.repo.get_user_word_proficiency(user_id, card.word)
+                    card.user_proficiency = prof_data["proficiency"]
+                    card.user_attempts = prof_data["attempts"]
+                    card.leitner_box = prof_data["leitner_box"]
+                except Exception:
+                    pass
+
+        # 4. Khởi tạo session trong Supabase
         session_id = f"sess_{uuid.uuid4().hex}"
         session_data = {
             "session_id": session_id,
@@ -266,6 +364,16 @@ class FlashcardService:
             cards=cards,
             usage=None
         )
+
+    async def _record_words_background(self, user_id: Optional[str], words: List[str]):
+        """Ghi nhận từ vựng tiếng Anh trong background."""
+        if not user_id or not words:
+            return
+        try:
+            for w in words[:20]:
+                await self.repo.record_english_words_exposure(user_id=user_id, text=w)
+        except Exception as e:
+            logger.debug(f"_record_words_background notice: {e}")
 
     # ── SUBMIT ANSWER & SRS UPDATE ───────────────────────────────────────────
 
@@ -343,7 +451,7 @@ class FlashcardService:
                     "message": f"Bạn đã hoàn toàn làm chủ từ '{req.word}'!",
                 }
 
-        # 4. Cập nhật phiên học trong MongoDB
+        # 4. Cập nhật phiên học trong Supabase
         current_streak = 0
         if req.session_id:
             sess = await self.repo.get_session(req.session_id)
@@ -511,3 +619,59 @@ class FlashcardService:
             ]
         }
         return await self.repo.create_set(default_payload)
+
+    # ── SPACE REPETITION SCHEDULE & DICTIONARY CACHE ─────────────────────────
+
+    async def get_repetition_config(self) -> RepetitionScheduleResponse:
+        """Lấy danh sách cấu hình các box và khoảng cách ngày ôn tập từ database."""
+        loops = await self.repo.get_repetition_loops()
+        boxes = [int(l["day_repetition"]) for l in loops]
+        loop_items = [
+            RepetitionLoopItem(
+                id=l.get("id"),
+                loop_order=l["loop_order"],
+                day_repetition=l["day_repetition"],
+                pre_loop_id=l.get("pre_loop_id"),
+                next_loop_id=l.get("next_loop_id"),
+            )
+            for l in loops
+        ]
+        return RepetitionScheduleResponse(
+            total_boxes=len(boxes),
+            boxes=boxes,
+            loops=loop_items
+        )
+
+    async def update_repetition_config(self, req: UpdateRepetitionScheduleRequest) -> RepetitionScheduleResponse:
+        """Cập nhật các khoảng cách ngày ôn tập tương ứng với các box trong database."""
+        loops = await self.repo.update_repetition_loops(req.boxes)
+        boxes = [int(l["day_repetition"]) for l in loops]
+        loop_items = [
+            RepetitionLoopItem(
+                id=l.get("id"),
+                loop_order=l["loop_order"],
+                day_repetition=l["day_repetition"],
+                pre_loop_id=l.get("pre_loop_id"),
+                next_loop_id=l.get("next_loop_id"),
+            )
+            for l in loops
+        ]
+        return RepetitionScheduleResponse(
+            total_boxes=len(boxes),
+            boxes=boxes,
+            loops=loop_items
+        )
+
+    async def get_dictionary_cache(
+        self,
+        limit: int = 200,
+        src: Optional[str] = None,
+        dest: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """Lấy dữ liệu từ điển và các senses từ database để phục vụ import tạo thẻ flashcard."""
+        return await self.repo.get_dictionary_cache(limit=limit, src=src, dest=dest)
+
+    async def cleanup_old_sessions(self) -> Dict[str, Any]:
+        """Dọn dẹp các session flashcard cũ quá 7 ngày."""
+        return await self.repo.cleanup_old_sessions()
+
