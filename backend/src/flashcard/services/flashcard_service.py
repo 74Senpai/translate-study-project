@@ -425,6 +425,31 @@ class FlashcardService:
                 except Exception:
                     pass
 
+        # Sau khi có proficiency, backend quyết định task type & sinh câu hỏi cho tất cả cards
+        # (bao gồm cả manual/AI cards chưa có selected_task_type)
+        settings_allowed = list(settings.allowed_task_types or ["choice", "fill", "complete"])
+        for card in cards:
+            if not card.selected_task_type:
+                prof = card.user_proficiency if card.user_proficiency is not None else 0.0
+                has_ctx = bool(card.context and str(card.context).strip())
+                has_def = bool(card.definition_en and str(card.definition_en).strip())
+                card.selected_task_type = DynamicGenerator._select_task_type(
+                    proficiency=prof,
+                    allowed_task_types=settings_allowed,
+                    has_context=has_ctx,
+                    has_definition_en=has_def,
+                )
+            if not card.question_text:
+                card.question_text = DynamicGenerator._build_question_text(
+                    task_type=card.selected_task_type,
+                    word=card.word,
+                    meaning=card.meaning,
+                    context=card.context,
+                    definition_en=card.definition_en,
+                    definition_vi=card.definition_vi,
+                )
+
+
         # 4. Khởi tạo session trong Supabase
         session_id = f"sess_{uuid.uuid4().hex}"
         session_data = {
@@ -497,13 +522,6 @@ class FlashcardService:
                 time_limit=req.time_limit
             )
             feedback = "Chính xác! Làm rất tốt."
-            if points_earned >= 9:
-                bonus_toast = {
-                    "type": "bonus",
-                    "title": "Tốc độ thần tốc!",
-                    "message": f"+{points_earned} điểm kinh nghiệm vì trả lời rất nhanh.",
-                    "bonusType": "speed"
-                }
         else:
             # Lấy thông tin gặp/dịch của từ
             encountered_count = 0

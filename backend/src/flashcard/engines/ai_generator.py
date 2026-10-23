@@ -110,16 +110,36 @@ class AIFlashcardGenerator:
             if not hint and include_hint:
                 hint = item.get("definition_vi") or f"Bắt đầu bằng chữ '{word[0]}'"
 
+            context_str = item.get("example")
+            def_en = item.get("definition_en")
+            def_vi = item.get("definition_vi")
+
+            # Backend chọn task type phù hợp theo proficiency (AI cards dùng proficiency=0)
+            selected_task = DynamicGenerator._select_task_type(
+                proficiency=0.0,
+                allowed_task_types=task_types,
+                has_context=bool(context_str and str(context_str).strip()),
+                has_definition_en=bool(def_en and str(def_en).strip()),
+            )
+            question_txt = DynamicGenerator._build_question_text(
+                task_type=selected_task,
+                word=word,
+                meaning=meaning,
+                context=context_str,
+                definition_en=def_en,
+                definition_vi=def_vi,
+            )
+
             card = FlashcardCard(
                 id=f"ai_{uuid.uuid4().hex[:8]}",
                 word=word,
                 meaning=meaning,
                 ipa=item.get("ipa"),
-                question=f"Chọn nghĩa hoặc hoàn thành từ '{word}'",
+                question="",
                 hint=hint,
-                context=item.get("example"),
-                definition_en=item.get("definition_en"),
-                definition_vi=item.get("definition_vi"),
+                context=context_str,
+                definition_en=def_en,
+                definition_vi=def_vi,
                 difficulty=difficulty,
                 timer=15,
                 points=10,
@@ -127,6 +147,8 @@ class AIFlashcardGenerator:
                 user_proficiency=0.0,
                 user_attempts=0,
                 leitner_box=1,
+                selected_task_type=selected_task,
+                question_text=question_txt,
             )
             cards.append(card)
         return cards

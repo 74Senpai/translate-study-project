@@ -34,6 +34,32 @@ const _ua = typeof navigator !== "undefined" ? navigator.userAgent : "";
 const isIOSDevice = /iPad|iPhone|iPod/.test(_ua) && !window.MSStream;
 const hasSpeechSupport = typeof window !== 'undefined' && !!window.speechSynthesis;
 
+// Kiểm tra có voices thực sự không (speech synthesis có thể tồn tại nhưng không có voices)
+const checkHasVoices = () => {
+  if (!hasSpeechSupport) return false;
+  try {
+    const voices = window.speechSynthesis.getVoices();
+    return Boolean(voices && voices.length > 0);
+  } catch {
+    return false;
+  }
+};
+
+// Ưu tiên phát file audio_url nếu có, fallback về TTS speakWord
+const playCardAudio = (targetCard) => {
+  if (!targetCard) return;
+  if (targetCard.audio_url) {
+    try {
+      const audio = new Audio(targetCard.audio_url);
+      audio.play().catch(() => speakWord(targetCard.word));
+      return;
+    } catch {
+      // Fallback
+    }
+  }
+  speakWord(targetCard.word);
+};
+
 // Global Unlocked AudioContext Manager for iOS/Chrome/Safari Gesture Compliance
 let globalAudioCtx = null;
 let _iosKeepAliveInterval = null;
@@ -494,21 +520,116 @@ export default function FlashcardPlayerPage() {
     }
   }, [gameState, currentCardIdx, activeTaskType]);
 
-  // Auto-speak in Audio Listening Mode
+  // Auto-speak in Audio Listening Mode hoặc các task nghe
   useEffect(() => {
-    if (isAudioMode && gameState === "playing" && set?.cards?.[currentCardIdx]) {
+    const isListenTask = activeTaskType === "listen_choice" || activeTaskType === "listen_write";
+    if ((isAudioMode || isListenTask) && gameState === "playing" && set?.cards?.[currentCardIdx]) {
       const card = set.cards[currentCardIdx];
       const timer = setTimeout(() => {
-        speakWord(card.word);
-      }, 300);
+        playCardAudio(card);
+      }, 350);
       return () => clearTimeout(timer);
     }
-  }, [gameState, currentCardIdx, isAudioMode, set]);
+  }, [gameState, currentCardIdx, isAudioMode, activeTaskType, set]);
 
   const [activePatternIdx, setActivePatternIdx] = useState(null);
   const [attemptsLeft, setAttemptsLeft] = useState(0);
   const [userResults, setUserResults] = useState([]); // Array of { card, isCorrect, userAnswer, targetAnswer }
   const [audioUnlocked, setAudioUnlocked] = useState(false);
+
+  // Pool nghĩa tiếng Việt và từ tiếng Anh từ toàn bộ cards trong session
+  // Frontend dùng để random options mỗi lần hiện card → options luôn thay đổi
+  const [sessionPools, setSessionPools] = useState({ viPool: [], enPool: [] });
+  // Cache options cho card hiện tại (shuffle lại mỗi lần initCard)
+  const [cardOptions, setCardOptions] = useState([]);
+
+  // Kiểm tra giọng đọc thực sự có sẵn ở trình duyệt
+  const [hasVoices, setHasVoices] = useState(() => checkHasVoices());
+
+  useEffect(() => {
+    if (!hasSpeechSupport) return;
+    const syncVoices = () => setHasVoices(checkHasVoices());
+    // voices có thể load async, nhất là lần đầu
+    window.speechSynthesis.addEventListener('voiceschanged', syncVoices);
+    syncVoices();
+    return () => window.speechSynthesis.removeEventListener('voiceschanged', syncVoices);
+  }, []);
+
+  // Xây dựng pool từ tất cả cards khi bắt đầu session (hoặc khi set thay đổi)
+  useEffect(() => {
+    if (!set?.cards?.length) return;
+    const viPool = [...new Set(
+      set.cards.map(c => (c.meaning || '').trim()).filter(Boolean)
+    )];
+    const enPool = [...new Set(
+      set.cards.map(c => (c.word || '').trim().toLowerCase()).filter(Boolean)
+    )];
+    setSessionPools({ viPool, enPool });
+  }, [set]);
+
+  /**
+   * Build dynamic options cho một card từ session pool.
+   * Mỗi lần gọi trả về array options khác nhau (shuffle random distractors).
+   * @param {object} card - card hiện tại
+   * @param {string} taskType - 'choice'|'listen_choice'|'def_choice'
+   * @param {'vi'|'en'} answerLang - 'vi': đáp án là nghĩa VI (choice/listen_choice), 'en': đáp án là từ EN (def_choice)
+   * @param {Array} cardsList - danh sách cards đầy đủ phòng khi sessionPools chưa kịp cập nhật state
+   * @returns {Array<{text, is_correct}>}
+   */
+  const buildDynamicOptions = (card, taskType, answerLang = 'vi', cardsList = null) => {
+    const cards = cardsList || set?.cards || [];
+    const viPool = sessionPools.viPool?.length
+      ? sessionPools.viPool
+      : [...new Set(cards.map(c => (c.meaning || '').trim()).filter(Boolean))];
+    const enPool = sessionPools.enPool?.length
+      ? sessionPools.enPool
+      : [...new Set(cards.map(c => (c.word || '').trim().toLowerCase()).filter(Boolean))];
+
+    if (answerLang === 'en') {
+      // def_choice: cho định nghĩa → chọn từ EN
+      const correctText = (card.word || '').trim();
+      const pool = enPool.filter(
+        w => w.toLowerCase() !== correctText.toLowerCase()
+      );
+      let distractors;
+      if (pool.length >= 3) {
+        const shuffled = [...pool].sort(() => Math.random() - 0.5);
+        distractors = shuffled.slice(0, 3).map(d => ({ text: d, is_correct: false }));
+      } else {
+        const backendOpts = (card.tasks?.def_choice?.options || card.tasks?.choice?.options || []).filter(o => !o.is_correct);
+        if (backendOpts.length > 0) {
+          distractors = backendOpts.map(o => ({ text: o.text, is_correct: false }));
+        } else {
+          distractors = pool.map(d => ({ text: d, is_correct: false }));
+        }
+      }
+      const options = [
+        { text: correctText, is_correct: true },
+        ...distractors
+      ];
+      return options.sort(() => Math.random() - 0.5);
+    } else {
+      // choice / listen_choice: hiện từ EN → chọn nghĩa VI
+      const correctText = (card.meaning || '').trim();
+      const pool = viPool.filter(
+        m => m.toLowerCase() !== correctText.toLowerCase()
+      );
+      let distractors;
+      if (pool.length >= 3) {
+        const shuffled = [...pool].sort(() => Math.random() - 0.5);
+        distractors = shuffled.slice(0, 3).map(d => ({ text: d, is_correct: false }));
+      } else {
+        const backendOpts = (card.tasks?.choice?.options || card.tasks?.listen_choice?.options || []).filter(o => !o.is_correct);
+        if (backendOpts.length > 0) {
+          distractors = backendOpts.map(o => ({ text: o.text, is_correct: false }));
+        } else {
+          distractors = pool.map(d => ({ text: d, is_correct: false }));
+        }
+      }
+      const options = [{ text: correctText, is_correct: true }, ...distractors];
+      return options.sort(() => Math.random() - 0.5);
+    }
+  };
 
   useEffect(() => {
     const unlock = () => {
@@ -672,36 +793,77 @@ export default function FlashcardPlayerPage() {
     setDynamicHint("");
     setAttemptsLeft(3);
 
-    // Pick a random enabled task
-    const enabledTasks = [];
-    if (card.tasks.choice?.enabled) enabledTasks.push("choice");
-    if (card.tasks.fill?.enabled) enabledTasks.push("fill");
-    if (card.tasks.complete?.enabled) enabledTasks.push("complete");
+    // Đọc task type do backend quyết định (theo proficiency spec mục 4)
+    // Fallback về random nếu backend chưa trả về (backward compat)
+    const backendTask = card.selected_task_type;
 
-    const pickedTask =
-      enabledTasks[Math.floor(Math.random() * enabledTasks.length)];
+    // Kiểm tra xem thiết bị có hỗ trợ nghe thực sự không
+    // (phải có cả speechSynthesis API lẫn voices đã load, hoặc card có audio_url)
+    const canListen = !!card.audio_url || (hasSpeechSupport && (hasVoices || checkHasVoices()));
+    const LISTEN_TASKS = ['listen_choice', 'listen_write'];
+
+    const enabledTasks = [];
+    if (card.tasks?.choice?.enabled) enabledTasks.push("choice");
+    if (card.tasks?.fill?.enabled) enabledTasks.push("fill");
+    if (card.tasks?.complete?.enabled) enabledTasks.push("complete");
+    // Chỉ thêm listen tasks nếu trình duyệt/thiết bị thực sự hỗ trợ audio
+    if (card.tasks?.listen_choice?.enabled && canListen) enabledTasks.push("listen_choice");
+    if (card.tasks?.listen_write?.enabled && canListen) enabledTasks.push("listen_write");
+    if (card.tasks?.def_choice?.enabled) enabledTasks.push("def_choice");
+    if (card.tasks?.def_write?.enabled) enabledTasks.push("def_write");
+
+    let pickedTask;
+    if (backendTask && card.tasks?.[backendTask]?.enabled !== false) {
+      // Backend đã chọn sẵn — nhưng nếu là listen task mà không có audio → fallback
+      if (LISTEN_TASKS.includes(backendTask) && !canListen) {
+        // Fallback: dùng non-listen equivalent hoặc choice
+        pickedTask = backendTask === 'listen_choice' ? 'choice'
+          : backendTask === 'listen_write' ? 'fill'
+          : 'choice';
+        // Đảm bảo fallback task có trong enabled list (hoặc mặc định choice)
+        if (!enabledTasks.includes(pickedTask)) pickedTask = enabledTasks[0] || 'choice';
+      } else {
+        pickedTask = backendTask;
+      }
+    } else {
+      // Fallback: chọn ngẫu nhiên trong các task enabled (không bao gồm listen nếu không support)
+      pickedTask = enabledTasks[Math.floor(Math.random() * enabledTasks.length)] || "choice";
+    }
     setActiveTaskType(pickedTask);
+
+    // Build dynamic options cho choice tasks từ session pool (thay đổi mỗi lần)
+    let currentOptions = [];
+    if (pickedTask === 'choice' || pickedTask === 'listen_choice') {
+      currentOptions = buildDynamicOptions(card, pickedTask, 'vi', cards);
+      setCardOptions(currentOptions);
+    } else if (pickedTask === 'def_choice') {
+      currentOptions = buildDynamicOptions(card, pickedTask, 'en', cards);
+      setCardOptions(currentOptions);
+    } else {
+      setCardOptions([]);
+    }
 
     // Decide if this card is presented in Audio Mode
     const randomAudio = Math.random() < 0.4;
-    const isAudio = audioModeEnabled && hasSpeechSupport && (pickedTask === "choice" || pickedTask === "fill") && !card.is_dynamic;
+    const isAudio = audioModeEnabled && canListen && (pickedTask === "choice" || pickedTask === "fill") && !card.is_dynamic;
     setIsAudioMode(isAudio ? randomAudio : false);
     setWordRevealed(false);
 
     // Initial state for choice tasks
-    if (pickedTask === "choice") {
-      const wrongCount = card.tasks.choice.options.filter(
-        (o) => !o.is_correct,
-      ).length;
+    if (pickedTask === "choice" || pickedTask === "listen_choice" || pickedTask === "def_choice") {
+      const taskKey = pickedTask === "listen_choice" ? "listen_choice" : pickedTask === "def_choice" ? "def_choice" : "choice";
+      const taskData = card.tasks?.[taskKey] || card.tasks?.choice;
+      const optsList = currentOptions.length > 0 ? currentOptions : (taskData?.options || []);
+      const wrongCount = optsList.filter((o) => !o.is_correct).length;
       setAttemptsLeft(wrongCount || 1);
       setCorrectSelected([]);
       setWrongSelected([]);
-      setUserAnswer(card.tasks.choice.multiple ? [] : null);
-    } else if (pickedTask === "fill") {
+      setUserAnswer(card.tasks?.choice?.multiple && pickedTask === "choice" ? [] : null);
+    } else if (pickedTask === "fill" || pickedTask === "listen_write" || pickedTask === "def_write" || pickedTask === "context_def_vi" || pickedTask === "context_def_en") {
       setUserAnswer("");
       setAttemptsLeft(3); // Default 3 tries for typing
     } else if (pickedTask === "complete") {
-      const patterns = card.tasks.complete?.patterns || [];
+      const patterns = card.tasks?.complete?.patterns || [];
       const pIdx = patterns.length > 0 ? Math.floor(Math.random() * patterns.length) : 0;
       setActivePatternIdx(pIdx);
       const pattern = patterns[pIdx];
@@ -737,56 +899,105 @@ export default function FlashcardPlayerPage() {
     let correct = false;
 
     // Validation logic based on activeTaskType
-    if (activeTaskType === "choice") {
-      const correctOpts = card.tasks.choice.options
+    if (activeTaskType === "choice" || activeTaskType === "listen_choice") {
+      const taskKey = activeTaskType === "listen_choice" ? "listen_choice" : "choice";
+      const taskData = card.tasks?.[taskKey] || card.tasks?.choice;
+      const optsList = cardOptions.length > 0 ? cardOptions : (taskData?.options || []);
+      const correctOpts = optsList
         .filter((o) => o.is_correct)
         .map((o) => o.text);
-      if (card.tasks.choice.multiple) {
+      if (correctOpts.length === 0 && card.meaning) {
+        correctOpts.push(card.meaning.trim());
+      }
+      if (taskData?.multiple) {
         correct =
           (answer || []).length === correctOpts.length &&
           (answer || []).every((u) => correctOpts.includes(u));
       } else {
         const singleAns = Array.isArray(answer) ? answer[0] : answer;
-        correct = singleAns === correctOpts[0];
+        correct = correctOpts.includes(singleAns);
       }
-    } else if (activeTaskType === "fill") {
+    } else if (activeTaskType === "fill" || activeTaskType === "listen_write" || activeTaskType === "def_write") {
+      const taskKey = activeTaskType === "listen_write" ? "listen_write"
+        : activeTaskType === "def_write" ? "def_write" : "fill";
+      const taskData = card.tasks?.[taskKey] || card.tasks?.fill;
       const answerStr = Array.isArray(answer) ? answer.join("") : answer || "";
-      correct = card.tasks.fill.answers.some(
+      correct = (taskData?.answers || [card.word]).some(
         (a) => a.toLowerCase().trim() === answerStr.toLowerCase().trim(),
       );
+    } else if (activeTaskType === "def_choice") {
+      const taskData = card.tasks?.def_choice;
+      const optsList = cardOptions.length > 0 ? cardOptions : (taskData?.options || []);
+      const correctOpts = optsList
+        .filter((o) => o.is_correct)
+        .map((o) => o.text);
+      if (correctOpts.length === 0 && card.word) {
+        correctOpts.push(card.word.trim());
+      }
+      const singleAns = Array.isArray(answer) ? answer[0] : answer;
+      correct = correctOpts.includes(singleAns);
+    } else if (activeTaskType === "context_def_vi" || activeTaskType === "context_def_en") {
+      // Write-answer tasks: so sánh với meaning hoặc definition
+      const answerStr = (Array.isArray(answer) ? answer.join("") : answer || "").toLowerCase().trim();
+      const expected = activeTaskType === "context_def_en"
+        ? (card.definition_en || "").toLowerCase().trim()
+        : (card.meaning || "").toLowerCase().trim();
+      correct = answerStr.length > 0 && (answerStr === expected ||
+        expected.includes(answerStr) || answerStr.includes(expected));
     } else if (activeTaskType === "complete") {
-      const pattern = card.tasks.complete.patterns[activePatternIdx];
-      const correctStr = pattern.blanks.join("");
-      const answerStr = Array.isArray(answer) ? answer.join("") : answer || "";
-      correct =
-        correctStr.toLowerCase().trim() === answerStr.toLowerCase().trim();
+      const pattern = card.tasks?.complete?.patterns?.[activePatternIdx];
+      if (!pattern) { correct = false; }
+      else {
+        const correctStr = pattern.blanks.join("");
+        const answerStr = Array.isArray(answer) ? answer.join("") : answer || "";
+        correct = correctStr.toLowerCase().trim() === answerStr.toLowerCase().trim();
+      }
     }
 
-    // On timeout: choice & complete auto-fail; fill evaluates whatever was typed
-    if (isTimeout && activeTaskType !== "fill") correct = false;
+    // On timeout: all tasks except fill-type auto-fail
+    const isTypingTask = ["fill", "listen_write", "def_write", "context_def_vi", "context_def_en"].includes(activeTaskType);
+    if (isTimeout && !isTypingTask) correct = false;
+
+    // Helper: get the correct answer string for display
+    const getTargetAnswer = () => {
+      if (activeTaskType === "choice" || activeTaskType === "listen_choice") {
+        const optsList = cardOptions.length > 0 ? cardOptions : (card.tasks?.[activeTaskType]?.options || card.tasks?.choice?.options || []);
+        const correct = optsList.filter((o) => o.is_correct).map((o) => o.text).join(", ");
+        return correct || card.meaning || "";
+      }
+      if (activeTaskType === "fill" || activeTaskType === "listen_write" || activeTaskType === "def_write") {
+        const taskKey = activeTaskType === "listen_write" ? "listen_write"
+          : activeTaskType === "def_write" ? "def_write" : "fill";
+        const taskData = card.tasks?.[taskKey] || card.tasks?.fill;
+        return (taskData?.answers || [card.word]).join(" | ");
+      }
+      if (activeTaskType === "def_choice") {
+        const optsList = cardOptions.length > 0 ? cardOptions : (card.tasks?.def_choice?.options || []);
+        const correct = optsList.filter((o) => o.is_correct).map((o) => o.text).join(", ");
+        return correct || card.word || "";
+      }
+      if (activeTaskType === "context_def_vi") return card.meaning || "";
+      if (activeTaskType === "context_def_en") return card.definition_en || card.meaning || "";
+      if (activeTaskType === "complete") {
+        return card.tasks?.complete?.patterns?.[activePatternIdx]?.blanks?.join("") || card.word;
+      }
+      return card.meaning || card.word || "";
+    };
 
     // Save result with rich context
     const resultObj = {
       card,
       isCorrect: correct,
       userAnswer: Array.isArray(answer)
-        ? activeTaskType === "choice"
+        ? (activeTaskType === "choice" || activeTaskType === "listen_choice" || activeTaskType === "def_choice")
           ? answer.join(", ")
           : answer.join("")
         : answer || "",
-      targetAnswer:
-        activeTaskType === "choice"
-          ? card.tasks.choice.options
-            .filter((o) => o.is_correct)
-            .map((o) => o.text)
-            .join(", ")
-          : activeTaskType === "fill"
-            ? card.tasks.fill.answers.join(" | ")
-            : card.tasks.complete.patterns[activePatternIdx].blanks.join(""),
+      targetAnswer: getTargetAnswer(),
       taskType: activeTaskType,
       displayPattern:
         activeTaskType === "complete"
-          ? card.tasks.complete.patterns[activePatternIdx].display_text
+          ? card.tasks?.complete?.patterns?.[activePatternIdx]?.display_text
           : null,
       word: card.word,
       meaning: card.meaning,
@@ -1347,14 +1558,20 @@ export default function FlashcardPlayerPage() {
   const handleChoiceToggle = (optText) => {
     if (gameState !== "playing") return;
     const card = set.cards[currentCardIdx];
-    const option = card.tasks.choice.options.find((o) => o.text === optText);
+    // Lấy task data đúng theo activeTaskType (choice, listen_choice, def_choice)
+    const taskKey = activeTaskType === "listen_choice" ? "listen_choice"
+      : activeTaskType === "def_choice" ? "def_choice" : "choice";
+    const taskData = card.tasks?.[taskKey] || card.tasks?.choice;
+    const optionsList = cardOptions.length > 0 ? cardOptions : (taskData?.options || []);
+    const option = optionsList.find((o) => o.text === optText);
+    if (!option) return;
 
     if (option.is_correct) {
       if (!correctSelected.includes(optText)) {
         const newCorrect = [...correctSelected, optText];
         setCorrectSelected(newCorrect);
 
-        const totalCorrect = card.tasks.choice.options.filter(
+        const totalCorrect = optionsList.filter(
           (o) => o.is_correct,
         ).length;
         if (newCorrect.length === totalCorrect) {
@@ -1893,26 +2110,49 @@ export default function FlashcardPlayerPage() {
     );
 
   const card = set?.cards?.[currentCardIdx];
-  const customQuestion = card?.question?.trim();
-  const hasCustomQuestion =
-    customQuestion &&
-    customQuestion.toLowerCase() !== (card?.word || "").toLowerCase().trim() &&
-    customQuestion.toLowerCase() !== (card?.meaning || "").toLowerCase().trim();
-  const taskQuestion =
-    activeTaskType === "choice" && card?.context?.trim()
-      ? `Trong câu ví dụ, từ "${card.word}" có nghĩa nào phù hợp nhất?`
-      : activeTaskType === "choice" && hasCustomQuestion
-      ? customQuestion
-      : activeTaskType === "choice"
-        ? `Nghĩa của từ "${card?.word || "..."}" là gì?`
-        : activeTaskType === "fill"
-          ? `Dịch sang ${
-              (card?.word || "").match(/^[a-zA-Z\s]+$/)
-                ? "tiếng Anh"
-                : "tiếng Việt"
-            }: "${card?.meaning || "..."}"`
-          : `Điền chữ cái còn thiếu để hoàn thành từ "${card?.word || "..."}"`;
 
+  // Ưu tiên câu hỏi do backend sinh sẵn (question_text) — backend quyết định dạng & câu hỏi
+  // Fallback về logic frontend (backward compat với manual cards không có question_text)
+  const wordLower = (card?.word || "").toLowerCase().trim();
+  const meaningLower = (card?.meaning || "").toLowerCase().trim();
+
+  const getBackendFallbackQuestion = () => {
+    // Câu hỏi do frontend tự sinh (cho cards cũ/thủ công)
+    const customQuestion = card?.question?.trim();
+    const customQuestionLower = (customQuestion || "").toLowerCase();
+    const hasCustomQuestion =
+      customQuestion &&
+      customQuestionLower !== wordLower &&
+      customQuestionLower !== meaningLower;
+    const hasChoiceSafeQuestion =
+      hasCustomQuestion &&
+      !customQuestionLower.includes(`'${wordLower}'`) &&
+      !customQuestionLower.includes(`"${wordLower}"`);
+    const hasFillSafeQuestion =
+      hasCustomQuestion && !customQuestionLower.includes(wordLower);
+
+    if (activeTaskType === "choice" && card?.context?.trim())
+      return `Trong câu ví dụ, từ "${card.word}" có nghĩa nào phù hợp nhất?`;
+    if (activeTaskType === "choice" && hasChoiceSafeQuestion) return customQuestion;
+    if (activeTaskType === "choice") return `Nghĩa của từ "${card?.word || "..."}" là gì?`;
+    if (activeTaskType === "fill" && hasFillSafeQuestion) return customQuestion;
+    if (activeTaskType === "fill")
+      return `Dịch sang ${
+        (card?.word || "").match(/^[a-zA-Z\s]+$/) ? "tiếng Anh" : "tiếng Việt"
+      }: "${card?.meaning || "..."}"`;
+    if (activeTaskType === "listen_choice") return "Nghe từ tiếng Anh và chọn nghĩa tiếng Việt đúng";
+    if (activeTaskType === "listen_write") return "Nghe từ tiếng Anh và viết lại từ đó";
+    if (activeTaskType === "def_choice") return `Cho định nghĩa, chọn từ tiếng Anh phù hợp`;
+    if (activeTaskType === "def_write") return `Cho định nghĩa, viết từ tiếng Anh tương ứng`;
+    if (activeTaskType === "context_def_vi") return `Viết định nghĩa tiếng Việt của từ "${card?.word}"`;
+    if (activeTaskType === "context_def_en") return `Viết định nghĩa tiếng Anh của từ "${card?.word}"`;
+    return "Điền chữ cái còn thiếu để hoàn thành từ";
+  };
+
+  // Backend question_text là nguồn chính xác khi task type khớp; fallback về getBackendFallbackQuestion nếu đã đổi dạng (ví dụ do canListen=false)
+  const taskQuestion = (activeTaskType === card?.selected_task_type && card?.question_text?.trim())
+    ? card.question_text.trim()
+    : getBackendFallbackQuestion();
   if (!card && (gameState === "playing" || gameState === "feedback")) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
@@ -2182,7 +2422,7 @@ export default function FlashcardPlayerPage() {
 
               {/* Interaction Layer */}
               <div className="space-y-6 relative">
-                {/* Choice Interaction */}
+                {/* Choice Interaction — dùng cardOptions (dynamic pool, thay đổi mỗi lần) */}
                 {activeTaskType === "choice" && (
                   <div className="space-y-4">
                     <div className="flex items-center justify-between px-4">
@@ -2192,11 +2432,7 @@ export default function FlashcardPlayerPage() {
                         </span>
                         <span className="text-sm font-black text-indigo-600">
                           {correctSelected.length} /{" "}
-                          {
-                            card.tasks.choice.options.filter(
-                              (o) => o.is_correct,
-                            ).length
-                          }
+                          {(cardOptions || []).filter((o) => o.is_correct).length || 1}
                         </span>
                       </div>
                       <div className="flex items-center gap-2">
@@ -2211,11 +2447,9 @@ export default function FlashcardPlayerPage() {
                       </div>
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      {card.tasks.choice.options.map((opt, i) => {
+                      {(cardOptions.length > 0 ? cardOptions : card.tasks?.choice?.options || []).map((opt, i) => {
                         const isWrong = wrongSelected.includes(opt.text);
-                        const isCorrectFound = correctSelected.includes(
-                          opt.text,
-                        );
+                        const isCorrectFound = correctSelected.includes(opt.text);
 
                         return (
                           <button
@@ -2434,6 +2668,147 @@ export default function FlashcardPlayerPage() {
                         })()}
                       </div>
                     </div>
+                  </div>
+                )}
+
+                {/* Listen Choice / Def Choice — Same UI as regular choice */}
+                {(activeTaskType === "listen_choice" || activeTaskType === "def_choice") && (() => {
+                  const taskKey = activeTaskType === "listen_choice" ? "listen_choice" : "def_choice";
+                  const taskData = card.tasks?.[taskKey] || card.tasks?.choice;
+                  if (!taskData) return null;
+                  const renderOptions = cardOptions.length > 0 ? cardOptions : (taskData.options || []);
+                  return (
+                    <div className="space-y-4">
+                      {/* For listen_choice: show listen controls */}
+                      {activeTaskType === "listen_choice" && (
+                        <div className="flex justify-center gap-3 mb-2">
+                          <button
+                            onClick={() => playCardAudio(card)}
+                            className="flex items-center gap-2 px-5 py-2.5 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-xl text-indigo-600 font-bold transition-all shadow-sm active:scale-95"
+                          >
+                            <Volume2 className="w-4 h-4 animate-pulse" />
+                            Nghe từ
+                          </button>
+                        </div>
+                      )}
+                      {/* For def_choice: show definition */}
+                      {activeTaskType === "def_choice" && (card.definition_en || card.definition_vi) && (
+                        <blockquote className="mx-auto max-w-2xl rounded-2xl border border-indigo-100 bg-indigo-50/60 px-5 py-4 text-left text-base font-semibold leading-relaxed text-slate-700">
+                          <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest block mb-1">Định nghĩa</span>
+                          {card.definition_en || card.definition_vi}
+                        </blockquote>
+                      )}
+
+                      <div className="flex items-center justify-between px-4">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                            Progress
+                          </span>
+                          <span className="text-sm font-black text-indigo-600">
+                            {correctSelected.length} /{" "}
+                            {(renderOptions || []).filter((o) => o.is_correct).length || 1}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                            Attempts Left
+                          </span>
+                          <span
+                            className={`text-sm font-black ${attemptsLeft === 1 ? "text-rose-500 animate-pulse" : "text-slate-600"}`}
+                          >
+                            {attemptsLeft}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        {renderOptions.map((opt, i) => {
+                          const isWrong = wrongSelected.includes(opt.text);
+                          const isCorrectFound = correctSelected.includes(opt.text);
+                          return (
+                            <button
+                              key={i}
+                              disabled={gameState === "feedback" || isWrong || isCorrectFound}
+                              onClick={() => handleChoiceToggle(opt.text)}
+                              className={`group p-6 rounded-[1.5rem] border-2 transition-all text-left relative active:scale-98 ${isCorrectFound
+                                ? "bg-emerald-50 border-emerald-500 text-emerald-700"
+                                : isWrong
+                                  ? "bg-rose-50 border-rose-200 text-rose-300 cursor-not-allowed"
+                                  : "bg-white border-slate-200 hover:border-indigo-300 text-slate-600"
+                              }`}
+                            >
+                              <span className="text-lg font-bold">{opt.text}</span>
+                              {isCorrectFound && <CheckCircle2 className="absolute top-4 right-4 w-5 h-5 text-emerald-500" />}
+                              {isWrong && <X className="absolute top-4 right-4 w-5 h-5 text-rose-300" />}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* Listen Write / Def Write / Context Def — Text input like fill */}
+                {(activeTaskType === "listen_write" || activeTaskType === "def_write" || activeTaskType === "context_def_vi" || activeTaskType === "context_def_en") && (
+                  <div key={`${currentCardIdx}-${activeTaskType}`} className="relative flex flex-col items-center gap-4 md:gap-6">
+                    {/* For listen_write: show listen control */}
+                    {activeTaskType === "listen_write" && (
+                      <div className="flex justify-center gap-3">
+                        <button
+                          onClick={() => playCardAudio(card)}
+                          className="flex items-center gap-2 px-5 py-2.5 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-xl text-indigo-600 font-bold transition-all shadow-sm active:scale-95"
+                        >
+                          <Volume2 className="w-4 h-4 animate-pulse" />
+                          Nghe từ
+                        </button>
+                      </div>
+                    )}
+                    {/* For def_write: show definition */}
+                    {(activeTaskType === "def_write") && (card.definition_en || card.definition_vi) && (
+                      <blockquote className="w-full mx-auto max-w-2xl rounded-2xl border border-indigo-100 bg-indigo-50/60 px-5 py-4 text-left text-base font-semibold leading-relaxed text-slate-700">
+                        <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest block mb-1">Định nghĩa</span>
+                        {card.definition_en || card.definition_vi}
+                      </blockquote>
+                    )}
+                    {/* For context tasks: show context sentence */}
+                    {(activeTaskType === "context_def_vi" || activeTaskType === "context_def_en") && card.context?.trim() && (
+                      <blockquote className="w-full mx-auto max-w-2xl rounded-2xl border border-indigo-100 bg-indigo-50/60 px-5 py-4 text-left text-base font-semibold leading-relaxed text-slate-700">
+                        <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest block mb-1">Câu ngữ cảnh</span>
+                        {card.context}
+                      </blockquote>
+                    )}
+                    <div className="w-full flex items-center justify-end mb-2">
+                      <div className="flex items-center gap-2 px-3 py-1 bg-slate-50/50 rounded-full border border-slate-100">
+                        <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">SỐ LẦN THỬ</span>
+                        <span className="text-sm font-black text-slate-600">{attemptsLeft}</span>
+                      </div>
+                    </div>
+                    <input
+                      autoFocus
+                      disabled={gameState === "feedback"}
+                      type="text"
+                      autoComplete="off"
+                      autoCorrect="off"
+                      autoCapitalize="off"
+                      spellCheck="false"
+                      placeholder={
+                        activeTaskType === "listen_write" ? "Viết từ bạn vừa nghe..."
+                        : activeTaskType === "def_write" ? "Viết từ tiếng Anh..."
+                        : activeTaskType === "context_def_en" ? "Viết định nghĩa tiếng Anh..."
+                        : "Viết định nghĩa tiếng Việt..."
+                      }
+                      className={`w-full p-4 md:p-8 bg-slate-50 rounded-2xl md:rounded-[2rem] text-xl md:text-4xl font-black text-center outline-none border-2 transition-all ${gameState === "feedback"
+                        ? isCorrect
+                          ? "border-emerald-500 bg-emerald-50 text-emerald-700"
+                          : "border-rose-500 bg-rose-50 text-rose-700"
+                        : isCorrect === false
+                          ? "border-rose-500 bg-rose-50 animate-shake"
+                          : "border-transparent focus:border-indigo-600 focus:bg-white text-slate-800"
+                      }`}
+                      value={userAnswer || ""}
+                      onChange={(e) => setUserAnswer(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && handleCheckAnswer()}
+                    />
                   </div>
                 )}
 

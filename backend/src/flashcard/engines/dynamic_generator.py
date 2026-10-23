@@ -47,6 +47,117 @@ class DynamicGenerator:
         return patterns
 
     @staticmethod
+    def _select_task_type(
+        proficiency: float,
+        allowed_task_types: List[str],
+        has_context: bool = False,
+        has_definition_en: bool = False,
+    ) -> str:
+        """
+        Chọn dạng bài phù hợp nhất dựa trên độ thông thạo theo spec mục 4:
+        - Dưới 0  : chỉ choice
+        - Trên 0  : choice, listen_choice
+        - Trên 20 : + complete (hoàn thành từ còn thiếu)
+        - Trên 30 : + fill (viết tiếng Anh theo nghĩa), listen_write
+        - Trên 50 : + def_choice (cho định nghĩa, chọn từ)
+        - Trên 60 : + def_write (cho định nghĩa, viết từ)
+        - Trên 70 : + context_def_vi (từ trong câu, viết nghĩa VI)
+        - Trên 80 : + context_def_en (từ trong câu, viết nghĩa EN)
+        Chọn dạng thách thức nhất trong giao của proficiency_allowed và allowed_task_types.
+        """
+        proficiency_allowed: List[str] = ["choice"]
+
+        if proficiency >= 0:
+            proficiency_allowed.append("listen_choice")
+        if proficiency >= 20:
+            proficiency_allowed.append("complete")
+        if proficiency >= 30:
+            proficiency_allowed += ["fill", "listen_write"]
+        if proficiency >= 50 and has_definition_en:
+            proficiency_allowed.append("def_choice")
+        if proficiency >= 60 and has_definition_en:
+            proficiency_allowed.append("def_write")
+        if proficiency >= 70 and has_context:
+            proficiency_allowed.append("context_def_vi")
+        if proficiency >= 80 and has_context:
+            proficiency_allowed.append("context_def_en")
+
+        # Giao với allowed_task_types của bộ thẻ — ưu tiên dạng thách thức nhất (cuối danh sách)
+        candidates = [t for t in proficiency_allowed if t in allowed_task_types]
+        if candidates:
+            return candidates[-1]
+
+        # Fallback theo thứ tự ưu tiên cơ bản
+        for t in ["choice", "fill", "complete"]:
+            if t in allowed_task_types:
+                return t
+        return "choice"
+
+    @staticmethod
+    def _build_question_text(
+        task_type: str,
+        word: str,
+        meaning: str,
+        context: Optional[str] = None,
+        definition_en: Optional[str] = None,
+        definition_vi: Optional[str] = None,
+    ) -> str:
+        """
+        Sinh câu hỏi phù hợp với task_type đã chọn — KHÔNG tiết lộ đáp án:
+        - choice      : hỏi nghĩa của từ (hiện từ, đáp án là nghĩa VI)
+        - fill        : hỏi dịch sang tiếng Anh (hiện nghĩa VI, đáp án là từ tiếng Anh)
+        - complete    : hỏi điền chữ còn thiếu (không hiện từ đầy đủ)
+        - listen_choice: nghe từ → chọn nghĩa tiếng Việt
+        - listen_write : nghe từ → viết từ tiếng Anh
+        - def_choice  : cho định nghĩa → chọn từ tiếng Anh
+        - def_write   : cho định nghĩa → viết từ tiếng Anh
+        - context_def_vi: từ trong câu → viết định nghĩa tiếng Việt
+        - context_def_en: từ trong câu → viết định nghĩa tiếng Anh
+        """
+        if task_type == "choice":
+            if context and context.strip():
+                return f'Trong câu ví dụ, từ "{word}" có nghĩa nào phù hợp nhất?'
+            return f'Nghĩa của từ "{word}" là gì?'
+
+        elif task_type == "fill":
+            return f'Dịch sang tiếng Anh: "{meaning}"'
+
+        elif task_type == "complete":
+            return "Điền các chữ cái còn thiếu để hoàn thành từ"
+
+        elif task_type == "listen_choice":
+            return "Nghe từ tiếng Anh và chọn nghĩa tiếng Việt đúng"
+
+        elif task_type == "listen_write":
+            return "Nghe từ tiếng Anh và viết lại từ đó"
+
+        elif task_type == "def_choice":
+            def_text = definition_en or definition_vi or ""
+            if def_text:
+                return f'Định nghĩa: "{def_text}" — Từ tiếng Anh nào phù hợp?'
+            return "Chọn từ tiếng Anh phù hợp với định nghĩa trên"
+
+        elif task_type == "def_write":
+            def_text = definition_en or definition_vi or ""
+            if def_text:
+                return f'Định nghĩa: "{def_text}" — Viết từ tiếng Anh tương ứng'
+            return "Viết từ tiếng Anh phù hợp với định nghĩa trên"
+
+        elif task_type == "context_def_vi":
+            ctx = context or ""
+            if ctx:
+                return f'Câu: "{ctx}" — Viết định nghĩa tiếng Việt của từ "{word}"'
+            return f'Viết định nghĩa tiếng Việt của từ "{word}"'
+
+        elif task_type == "context_def_en":
+            ctx = context or ""
+            if ctx:
+                return f'Câu: "{ctx}" — Viết định nghĩa tiếng Anh của từ "{word}"'
+            return f'Viết định nghĩa tiếng Anh của từ "{word}"'
+
+        return f'Nghĩa của từ "{word}" là gì?'
+
+    @staticmethod
     def _build_card_tasks(
         word: str,
         meaning: str,
@@ -54,8 +165,9 @@ class DynamicGenerator:
         allowed_task_types: List[str],
         proficiency: float = 0.0,
         definition_en: Optional[str] = None,
+        word_distractors: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
-        """Xây dựng các dạng bài tập phù hợp cho card."""
+        """Xây dựng tất cả dạng bài tập cho card (backend cung cấp đủ data để frontend render)."""
         options = [{"text": meaning, "is_correct": True}]
         seen_meanings = {meaning.strip().casefold()}
         for distractor in distractors:
@@ -88,7 +200,7 @@ class DynamicGenerator:
             }
         }
 
-        # Nếu user đạt trình độ nghe hoặc nâng cao
+        # listen_choice: nghe từ tiếng Anh → chọn nghĩa tiếng Việt
         if "listen_choice" in allowed_task_types or proficiency >= 0:
             tasks["listen_choice"] = {
                 "enabled": True,
@@ -96,23 +208,34 @@ class DynamicGenerator:
                 "options": options
             }
 
+        # listen_write: nghe từ tiếng Anh → viết từ tiếng Anh
         if "listen_write" in allowed_task_types or proficiency >= 30:
             tasks["listen_write"] = {
                 "enabled": True,
                 "answers": [word.strip().lower()]
             }
 
+        # def_choice: cho định nghĩa → chọn từ tiếng Anh
         if definition_en and (proficiency >= 50 or "def_choice" in allowed_task_types):
+            en_distractors = word_distractors or []
             tasks["def_choice"] = {
                 "enabled": True,
                 "multiple": False,
                 "options": [
                     {"text": word, "is_correct": True},
-                    *[{"text": d, "is_correct": False} for d in distractors[:3]]
+                    *[{"text": d, "is_correct": False} for d in en_distractors[:3]]
                 ]
             }
 
+        # def_write: cho định nghĩa → viết từ tiếng Anh
+        if definition_en and (proficiency >= 60 or "def_write" in allowed_task_types):
+            tasks["def_write"] = {
+                "enabled": True,
+                "answers": [word.strip().lower()]
+            }
+
         return tasks
+
 
     @classmethod
     async def generate_user_dynamic_cards(
@@ -280,13 +403,33 @@ class DynamicGenerator:
             ]
 
             prof = item.get("proficiency", 0.0)
+            context_str = s_data.get("example_en")
+            def_en = s_data.get("definition_en")
+            def_vi = s_data.get("definition_vi")
+
+            # Backend chọn task type phù hợp theo proficiency (spec mục 4)
+            selected_task = cls._select_task_type(
+                proficiency=prof,
+                allowed_task_types=allowed_types,
+                has_context=bool(context_str and context_str.strip()),
+                has_definition_en=bool(def_en and def_en.strip()),
+            )
+            question_txt = cls._build_question_text(
+                task_type=selected_task,
+                word=word_str,
+                meaning=meaning,
+                context=context_str,
+                definition_en=def_en,
+                definition_vi=def_vi,
+            )
+
             tasks = cls._build_card_tasks(
                 word=word_str,
                 meaning=meaning,
                 distractors=distractors,
                 allowed_task_types=allowed_types,
                 proficiency=prof,
-                definition_en=s_data.get("definition_en")
+                definition_en=def_en
             )
 
             card = FlashcardCard(
@@ -295,10 +438,10 @@ class DynamicGenerator:
                 meaning=meaning,
                 ipa=s_data.get("ipa"),
                 question="",
-                hint=s_data.get("definition_vi") or s_data.get("definition_en") or f"Bắt đầu bằng chữ '{word_str[0]}'",
-                context=s_data.get("example_en"),
-                definition_en=s_data.get("definition_en"),
-                definition_vi=s_data.get("definition_vi"),
+                hint=def_vi or def_en or f"Bắt đầu bằng chữ '{word_str[0]}'",
+                context=context_str,
+                definition_en=def_en,
+                definition_vi=def_vi,
                 difficulty="medium" if prof >= 0 else "easy",
                 timer=settings.per_card_timer or 15,
                 points=10,
@@ -306,7 +449,9 @@ class DynamicGenerator:
                 sense_id=sense_id,
                 user_proficiency=prof,
                 user_attempts=item.get("attempts", 0),
-                leitner_box=item.get("leitner_box", 1)
+                leitner_box=item.get("leitner_box", 1),
+                selected_task_type=selected_task,
+                question_text=question_txt,
             )
             cards.append(card)
 
@@ -363,8 +508,27 @@ class DynamicGenerator:
         for it in selected:
             word_str = it.get("word") or "word"
             meaning = it.get("meaning_vi") or "nghĩa"
+            context_str = it.get("example_en")
+            def_en = it.get("definition_en")
+            def_vi = it.get("definition_vi")
             distractors = [m for m in all_meanings if m != meaning]
             random.shuffle(distractors)
+
+            # System dynamic: proficiency=0, backend chọn task type theo spec
+            selected_task = cls._select_task_type(
+                proficiency=0.0,
+                allowed_task_types=allowed_types,
+                has_context=bool(context_str and context_str.strip()),
+                has_definition_en=bool(def_en and def_en.strip()),
+            )
+            question_txt = cls._build_question_text(
+                task_type=selected_task,
+                word=word_str,
+                meaning=meaning,
+                context=context_str,
+                definition_en=def_en,
+                definition_vi=def_vi,
+            )
 
             tasks = cls._build_card_tasks(
                 word=word_str,
@@ -372,7 +536,7 @@ class DynamicGenerator:
                 distractors=distractors,
                 allowed_task_types=allowed_types,
                 proficiency=0.0,
-                definition_en=it.get("definition_en")
+                definition_en=def_en
             )
 
             card = FlashcardCard(
@@ -381,10 +545,10 @@ class DynamicGenerator:
                 meaning=meaning,
                 ipa=it.get("ipa"),
                 question="",
-                hint=it.get("definition_en") or f"Chữ cái đầu: {word_str[0]}",
-                context=it.get("example_en"),
-                definition_en=it.get("definition_en"),
-                definition_vi=it.get("definition_vi"),
+                hint=def_en or f"Chữ cái đầu: {word_str[0]}",
+                context=context_str,
+                definition_en=def_en,
+                definition_vi=def_vi,
                 difficulty="medium",
                 timer=settings.per_card_timer or 15,
                 points=10,
@@ -392,7 +556,9 @@ class DynamicGenerator:
                 sense_id=it.get("id"),
                 user_proficiency=0.0,
                 user_attempts=0,
-                leitner_box=1
+                leitner_box=1,
+                selected_task_type=selected_task,
+                question_text=question_txt,
             )
             cards.append(card)
 

@@ -142,6 +142,9 @@ class FlashcardCard(BaseModel):
     user_proficiency: Optional[float] = None
     user_attempts: Optional[int] = None
     leitner_box: Optional[int] = 1
+    # Backend-selected task type và câu hỏi — frontend chỉ hiển thị theo đây
+    selected_task_type: Optional[str] = None  # "choice", "fill", "complete", "listen_choice", "listen_write", "def_choice", ...
+    question_text: Optional[str] = None       # Câu hỏi đã build sẵn, phù hợp với selected_task_type
 
     @field_validator("difficulty", mode="before")
     @classmethod

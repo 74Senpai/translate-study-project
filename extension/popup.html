@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+    <meta charset="UTF-8">
+    <title>DeepTranslate</title>
+    <link rel="stylesheet" href="assets/fonts/inter.css">
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+    <div class="app-container">
+        <!-- HEADER SECTION -->
+        <header class="header">
+            <div class="top-bar">
+                <div class="brand">
+                    <img src="assets/icons/icon32.png" alt="Logo" class="logo-img">
+                    <h1>DeepTranslate</h1>
+                </div>
+                <div class="user-profile" id="user-profile">
+                    <button id="login-btn" class="login-badge">Đăng nhập</button>
+                    <div id="user-info" style="display: none;" class="user-info-container">
+                        <button id="avatar-btn" class="avatar-btn">U</button>
+                        <div id="user-dropdown" class="user-dropdown">
+                            <div class="dropdown-header">
+                                <span id="username" class="username">Account</span>
+                            </div>
+                            <div class="dropdown-divider"></div>
+                            <button id="profile-btn" class="dropdown-item"><svg xmlns="http://www.w3.org/2000/svg"
+                                    width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
+                                    <circle cx="12" cy="7" r="4" />
+                                </svg> Hồ sơ</button>
+                            <button id="saved-words-btn" class="dropdown-item"><svg xmlns="http://www.w3.org/2000/svg"
+                                    width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" />
+                                    <polyline points="10 2 10 10 13 7 16 10 16 2" />
+                                </svg> Từ đã lưu</button>
+                            <button id="settings-btn" class="dropdown-item"><svg xmlns="http://www.w3.org/2000/svg"
+                                    width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <circle cx="12" cy="12" r="3" />
+                                    <path
+                                        d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+                                </svg> Cài đặt</button>
+                            <div class="dropdown-divider"></div>
+                            <button id="logout-btn" class="dropdown-item logout">Đăng xuất</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="toolbar">
+                <div class="mode-switcher">
+                    <button id="mode-en-vi" class="active">EN ➔ VN</button>
+                    <button id="mode-vi-en">VN ➔ EN</button>
+                </div>
+            </div>
+        </header>
+
+        <!-- QUICK SETTINGS -->
+        <div class="quick-settings">
+            <div class="settings-group">
+                <select id="view-mode-select" class="small-select">
+                    <option value="full">Đầy đủ</option>
+                    <option value="compact">Rút gọn</option>
+                </select>
+                <div class="tool-buttons">
+                    <button id="zoom-out" class="icon-btn" title="Thu nhỏ">－</button>
+                    <button id="zoom-in" class="icon-btn" title="Phóng to">＋</button>
+                    <button id="pin-btn" class="icon-btn" title="Ghim">📌</button>
+                </div>
+            </div>
+            <div class="settings-group">
+                <span class="label">Dịch nhanh:</span>
+                <label class="switch">
+                    <input type="checkbox" id="toggle-translate" checked>
+                    <span class="slider"></span>
+                </label>
+            </div>
+        </div>
+
+        <main class="grid-layout">
+            <div class="left-column">
+                <!-- INPUT SECTION -->
+                <section class="card">
+                    <div class="result-header">
+                        <label class="section-label" id="input-label">NHẬP TIẾNG VIỆT</label>
+                        <button class="minimal-toggle" id="clear-btn">XÓA TRẮNG</button>
+                    </div>
+                    <textarea id="input-text" class="main-textarea no-transition"
+                        placeholder="Nhập nội dung cần xử lý..."></textarea>
+                    <div id="loading-line" class="loading-line"></div>
+                    <div id="error-message"></div>
+                </section>
+
+                <!-- RESULT SECTION -->
+                <section class="card" id="result-section" style="display: none;">
+                    <div class="result-header">
+                        <label class="section-label" id="result-label">ENGLISH RESULT</label>
+                        <div class="result-actions">
+                            <div class="analyzing-badge">
+                                <div class="ping-dot"></div>
+                                <span>PHÂN TÍCH...</span>
+                            </div>
+                            <button id="copy-btn" class="minimal-toggle">SAO CHÉP</button>
+                        </div>
+                    </div>
+
+                    <div id="analysis-container">
+                        <div class="pos-legend" id="pos-legend"></div>
+                        <div class="interactive-sentence result-style" id="interactive-sentence"></div>
+                    </div>
+
+                    <div class="vietnamese-result" id="translation-container">
+                        <p class="vi-main-text" id="translated-text"></p>
+                    </div>
+                </section>
+
+                <!-- FLASHCARD & SYSTEM BOX -->
+                <!-- Sử dụng đúng ID flashcard-section để script có thể ẩn/hiện -->
+                <section id="flashcard-section" class="card" style="display: none;">
+                    <div class="result-header">
+                        <label class="section-label">⚡ FLASHCARD NHANH</label>
+                        <button id="flashcard-do-now-btn">Làm Ngay</button>
+                    </div>
+
+                    <!-- Notification Panel nằm bên trong box flashcard -->
+                    <div id="notification-panel" style="margin-top: 10px;">
+                        <div class="result-header" style="margin-bottom: 5px;">
+                            <label class="section-label" style="color: #ff9500;">📌 THÔNG BÁO</label>
+                            <!-- <button id="notification-close-btn">✕</button> -->
+                        </div>
+                        <div id="notification-content">
+                            <!-- Nội dung thông báo được inject từ JS -->
+                        </div>
+                        <div id="notification-actions">
+                            <button id="notification-snooze-1h" class="notification-action-btn">Ẩn 1h</button>
+                            <button id="notification-snooze-3h" class="notification-action-btn">Ẩn 3h</button>
+                            <button id="notification-disable-site-btn" class="notification-action-btn">Tắt trang
+                                này</button>
+                            <!-- Dự phòng ID disable-site-btn nếu JS của bạn yêu cầu -->
+                            <span id="disable-site-btn" style="display:none"></span>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </main>
+
+        <!-- PROMO BANNER -->
+        <div id="promo-banner" class="promo-banner">
+            <a href="https://deeptranslate.org/login" target="_blank" class="promo-link">
+                <span>Đăng nhập để sử dụng đầy đủ chức năng</span>
+            </a>
+        </div>
+
+        <!-- FOOTER -->
+        <footer class="footer">
+            <div class="footer-content">
+                <div class="footer-links">
+                    <a href="https://deeptranslate.org/about" target="_blank">Giới thiệu</a>
+                    <a href="https://deeptranslate.org/support" target="_blank">Hỗ trợ</a>
+                    <a href="https://deeptranslate.org/terms" target="_blank">Điều khoản</a>
+                    <a href="https://deeptranslate.org/privacy-policy" target="_blank">Bảo mật</a>
+                </div>
+            </div>
+        </footer>
+    </div>
+
+    <script src="config.js"></script>
+    <script src="popup.js"></script>
+</body>
+
+</html>

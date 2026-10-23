@@ -1,0 +1,1153 @@
+/* Biến CSS để dễ quản lý màu sắc và font */
+:root {
+    --primary-color: #2563eb;
+    --primary-color-hover: #1d4ed8;
+    --background-dark: #f8fafc;
+    --card-background: #ffffff;
+    --border-color: #e2e8f0;
+    --text-color: #1e293b;
+    --text-light: #64748b;
+    --font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    --success-color: #10b981;
+    --danger-color: #ef4444;
+    --app-zoom: 1;
+    --content-zoom: 1;
+}
+
+/* Tự động chuyển màu theo chế độ Sáng/Tối của trình duyệt */
+@media (prefers-color-scheme: dark) {
+    :root {
+        --background-dark: #0f172a;
+        --card-background: #1e293b;
+        --border-color: #334155;
+        --text-color: #f1f5f9;
+        --text-light: #94a3b8;
+    }
+}
+
+/* Thêm định dạng cho SVG icons */
+svg {
+    vertical-align: middle;
+    margin-right: 6px;
+    flex-shrink: 0;
+}
+
+select {
+    background-color: var(--card-background);
+    color: var(--text-color);
+    border: 1px solid var(--border-color);
+    padding: 6px 10px;
+    border-radius: 6px;
+    font-family: var(--font-family);
+    font-size: 14px;
+    cursor: pointer;
+    outline: none;
+    transition: border-color 0.2s ease;
+}
+
+select:focus {
+    border-color: var(--primary-color);
+}
+
+body {
+    font-family: var(--font-family);
+    width: 400px;
+    margin: 0 auto;
+    /* Căn giữa nếu không gian rộng hơn */
+    padding: 15px;
+    background-color: var(--background-dark);
+    color: var(--text-color);
+    box-sizing: border-box;
+    overflow-x: hidden;
+}
+
+body.pinned-mode {
+    width: 100vw;
+    min-width: 350px;
+    /* Không cho phép thu nhỏ quá mức gây mất nội dung */
+    max-width: 420px;
+    min-height: 100vh;
+}
+
+body.pinned-mode .app-container {
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+h2 {
+    margin-top: 0;
+    font-size: 24px;
+    text-align: center;
+    color: var(--primary-color);
+    font-weight: 700;
+    margin-bottom: 15px;
+}
+
+.app-container {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+.header {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-bottom: 10px;
+}
+
+.top-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.brand {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.logo-img {
+    width: 24px;
+    height: 24px;
+    filter: drop-shadow(0 2px 4px rgba(37, 99, 235, 0.2));
+}
+
+.brand h1 {
+    margin: 0;
+    color: var(--primary-color);
+    font-size: 1.1rem;
+    font-weight: 800;
+    letter-spacing: -0.01em;
+}
+
+/* Auth Section */
+.user-profile {
+    display: flex;
+    align-items: center;
+}
+
+.login-badge {
+    background: var(--primary-color);
+    color: white;
+    border: none;
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s;
+    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.2);
+}
+
+.login-badge:hover {
+    background: var(--primary-color-hover);
+    transform: translateY(-1px);
+    box-shadow: 0 6px 15px rgba(37, 99, 235, 0.3);
+}
+
+.user-info-container {
+    position: relative;
+    display: flex;
+    align-items: center;
+    align-self: center;
+}
+
+.avatar-btn {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: var(--primary-color);
+    color: white;
+    border: 2px solid var(--card-background);
+    font-size: 16px;
+    font-weight: 800;
+    cursor: pointer;
+    display: block;
+    transition: all 0.2s;
+    /* box-shadow: 0 4px 10px rgba(37, 99, 235, 0.2); */
+    overflow: hidden;
+    transform-origin: center center;
+}
+
+.avatar-btn:hover {
+    transform: scale(1.05);
+    box-shadow: 0 6px 15px rgba(37, 99, 235, 0.3);
+}
+
+.user-dropdown {
+    position: absolute;
+    top: 120%;
+    right: 0;
+    width: 180px;
+    background: var(--card-background);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+    z-index: 1000;
+    display: none;
+    flex-direction: column;
+    padding: 8px 0;
+    animation: slide-in-top 0.2s ease-out;
+}
+
+.user-dropdown.visible {
+    display: flex;
+}
+
+.dropdown-header {
+    padding: 8px 16px 4px 16px;
+}
+
+.dropdown-divider {
+    height: 1px;
+    background: var(--border-color);
+    margin: 8px 0;
+}
+
+.dropdown-item {
+    padding: 10px 16px;
+    background: none;
+    border: none;
+    width: 100%;
+    text-align: left;
+    font-size: 14px;
+    color: var(--text-color);
+    cursor: pointer;
+    transition: background 0.2s;
+    font-family: inherit;
+    font-weight: 500;
+}
+
+.dropdown-item:hover {
+    background: var(--background-dark);
+}
+
+.dropdown-item.logout {
+    color: var(--danger-color);
+}
+
+@keyframes slide-in-top {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.username {
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: var(--text-color);
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+
+/* Toolbar & Mode Switcher */
+.toolbar {
+    width: 100%;
+}
+
+.mode-switcher {
+    display: flex;
+    background: var(--background-dark);
+    padding: 4px;
+    border-radius: 12px;
+    border: 1px solid var(--border-color);
+}
+
+.mode-switcher button {
+    flex: 1;
+    border: none;
+    background: none;
+    padding: 8px 12px;
+    border-radius: 8px;
+    font-weight: 600;
+    color: var(--text-light);
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    font-size: 0.75rem;
+    white-space: nowrap;
+}
+
+.mode-switcher button.active {
+    background: var(--card-background);
+    color: var(--primary-color);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+
+/* Promo Banner */
+.promo-banner {
+    margin: 10px 15px 0 15px;
+    padding: 10px;
+    background: rgba(37, 99, 235, 0.05);
+    border: 1px dashed var(--primary-color);
+    border-radius: 10px;
+    text-align: center;
+    transition: all 0.3s;
+}
+
+.promo-banner:hover {
+    background: rgba(37, 99, 235, 0.08);
+    transform: translateY(-1px);
+}
+
+.promo-link {
+    text-decoration: none;
+    color: var(--primary-color);
+    font-size: 0.75rem;
+    font-weight: 600;
+    display: block;
+}
+
+/* Card Common */
+.card {
+
+    background: var(--card-background);
+    padding: 15px;
+    border-radius: 12px;
+    border: 1px solid var(--border-color);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.02);
+    margin-bottom: 15px;
+}
+
+.result-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+    gap: 10px;
+}
+
+.result-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+
+.section-label {
+    display: block;
+    font-size: 0.65rem;
+    font-weight: 800;
+    color: #94a3b8;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    white-space: nowrap;
+    flex-shrink: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.minimal-toggle {
+    background: var(--border-color);
+    border: none;
+    padding: 4px 10px;
+    border-radius: 15px;
+    font-size: 0.6rem;
+    font-weight: 700;
+    color: var(--text-color);
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.minimal-toggle:hover {
+    background: var(--primary-color);
+    color: white;
+}
+
+.icon-btn {
+    background: var(--border-color);
+    border: none;
+    border-radius: 4px;
+    color: var(--text-color);
+    cursor: pointer;
+    font-weight: bold;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+    font-size: 14px;
+    padding: 2px 6px;
+}
+
+.icon-btn:hover {
+    background: var(--primary-color);
+    color: white;
+}
+
+.small-select {
+    padding: 2px 5px;
+    font-size: 0.75rem;
+    border-radius: 4px;
+    border: 1px solid var(--border-color);
+    background-color: var(--card-background);
+    color: var(--text-color);
+    outline: none;
+}
+
+/* Textarea */
+.main-textarea {
+    width: 100%;
+    min-height: 80px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 12px;
+    resize: none;
+    overflow: hidden;
+    outline: none;
+    box-sizing: border-box;
+    background: var(--card-background);
+    font-family: inherit;
+    --dynamic-font-size: 1.2rem;
+    font-size: calc(var(--dynamic-font-size) * var(--content-zoom));
+    line-height: 1.4;
+    color: var(--text-color);
+    text-align: justify;
+    hyphens: auto;
+    padding-bottom: 15px;
+    /* Thêm khoảng đệm an toàn để không bị dính sàn */
+}
+
+.main-textarea.no-transition {
+    transition: none !important;
+}
+
+#result-section {
+    opacity: 0;
+    transform: translateY(10px);
+    transition: opacity 0.5s cubic-bezier(0.4, 0, 0.2, 1), transform 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+#result-section.visible {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+.main-textarea:focus {
+    border-color: var(--primary-color);
+}
+
+/* POS Legend */
+.pos-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 12px; /* Giảm lại cho cân đối */
+}
+
+.pos-pill {
+    color: white;
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: 0.65rem;
+    font-weight: 700;
+    text-decoration: none;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.pos-pill:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.2);
+    filter: brightness(1.1);
+}
+
+.pos-add-btn {
+    background: rgba(255, 255, 255, 0.25);
+    color: white;
+    border: none;
+    border-radius: 50%;
+    width: 14px;
+    height: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.7rem;
+    font-weight: bold;
+    cursor: pointer;
+    opacity: 0;
+    margin-right: -4px; /* to compensate for pill padding */
+    transition: opacity 0.2s, transform 0.2s, background 0.2s;
+}
+
+.pos-pill:hover .pos-add-btn {
+    opacity: 1;
+}
+
+.pos-add-btn:hover {
+    background: rgba(255, 255, 255, 0.5);
+    transform: scale(1.2);
+}
+
+/* Interactive Sentence */
+.interactive-sentence {
+    min-height: 80px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0 4px;
+    background: var(--background-dark);
+    padding: 12px;
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+    font-size: calc(0.95rem * var(--content-zoom));
+    line-height: 1.6; /* Hạ xuống để trông gọn gàng hơn */
+    transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative;
+    overflow: visible; /* Critical for tooltips */
+}
+
+.word-wrapper {
+    position: relative;
+    display: inline-block;
+}
+
+.word-token {
+    cursor: help;
+    padding: 2px 4px;
+    border-radius: 4px;
+    font-weight: 600;
+}
+
+.word-token:hover {
+    background: #f1f5f9;
+}
+
+/* Translation */
+.vietnamese-result {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border-color);
+}
+
+.vi-main-text {
+    font-size: calc(0.95rem * var(--content-zoom));
+    color: var(--text-color);
+    margin: 0;
+    font-style: italic;
+    line-height: 1.6;
+    word-break: break-word;
+    overflow-wrap: break-word;
+    white-space: pre-wrap;
+    text-align: justify;
+    hyphens: auto;
+    padding-bottom: 10px;
+}
+
+/* Loading */
+.loading-line {
+    height: 3px;
+    background: linear-gradient(90deg,
+            transparent 0%,
+            var(--primary-color) 50%,
+            transparent 100%);
+    background-size: 200% 100%;
+    width: 100%;
+    animation: shimmer 2.5s infinite cubic-bezier(0.4, 0, 0.2, 1);
+    margin-top: -3px;
+    border-radius: 2px;
+    display: none;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+.loading-line.show {
+    display: block;
+    opacity: 1;
+}
+
+@keyframes shimmer {
+    0% {
+        background-position: 200% 0;
+    }
+
+    100% {
+        background-position: -200% 0;
+    }
+}
+
+/* Skeleton Loading for Results */
+#result-section .word-token,
+#result-section .vi-main-text,
+#result-section #pos-legend {
+    transition: opacity 0.4s cubic-bezier(0.4, 0, 0.2, 1), filter 0.4s ease;
+}
+
+#result-section.loading-analysis .word-token,
+#result-section.loading-translation .vi-main-text {
+    opacity: 0.4;
+}
+
+/* Hiệu ứng loading cho Badge */
+.analyzing-badge {
+    display: none;
+    align-items: center;
+    gap: 6px;
+    opacity: 0;
+    transform: translateY(5px) scale(0.95);
+    background: var(--primary-color);
+    color: white;
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 0.65rem;
+    font-weight: 700;
+}
+
+#result-section.loading-analysis .analyzing-badge {
+    display: flex;
+    animation: badge-appear 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) forwards, pulse-gentle 2s infinite ease-in-out 0.4s;
+    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
+}
+
+/* Hide copy button only when translation is loading */
+#result-section.loading-translation #copy-btn {
+    display: none;
+}
+
+@keyframes badge-appear {
+    from {
+        opacity: 0;
+        transform: translateY(5px) scale(0.95);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+#result-section.loading-analysis #analysis-container {
+    position: relative;
+    min-height: 100px;
+}
+
+/* Hiệu ứng loading cực mạnh cho khung phân tích */
+#result-section #interactive-sentence {
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+#result-section.loading-analysis #interactive-sentence {
+    min-height: 80px;
+    background: var(--background-dark) !important;
+    border-color: rgba(37, 99, 235, 0.5) !important;
+    box-shadow: 0 0 15px rgba(37, 99, 235, 0.1);
+    position: relative;
+    overflow: hidden;
+}
+
+/* Hiệu ứng tia quét (Scanning line) cực mạnh */
+#result-section.loading-analysis #interactive-sentence::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: -150%;
+    width: 150%;
+    height: 100%;
+    background: linear-gradient(90deg,
+            transparent 0%,
+            rgba(37, 99, 235, 0) 30%,
+            rgba(37, 99, 235, 0.2) 50%,
+            rgba(37, 99, 235, 0) 70%,
+            transparent 100%);
+    animation: scan-active 2s infinite linear;
+    z-index: 1;
+}
+
+@keyframes scan-active {
+    0% {
+        transform: translateX(0);
+    }
+
+    100% {
+        transform: translateX(200%);
+    }
+}
+
+#result-section.loading-analysis #interactive-sentence::after {
+    content: "Đang phân tích cấu trúc câu...";
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-color);
+    font-size: 0.85rem;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    opacity: 0;
+    animation: fade-in-up 0.5s forwards 0.2s;
+}
+
+@keyframes fade-in-up {
+    from {
+        opacity: 0;
+        transform: translateY(5px);
+    }
+
+    to {
+        opacity: 0.6;
+        transform: translateY(0);
+    }
+}
+
+@keyframes pulse-gentle {
+
+    0%,
+    100% {
+        transform: scale(1);
+        opacity: 1;
+    }
+
+    50% {
+        transform: scale(1.03);
+        opacity: 0.8;
+    }
+}
+
+/* Ẩn nội dung cũ nếu đang loading cái mới */
+#result-section.loading-analysis #pos-legend {
+    opacity: 0.3;
+    filter: blur(1px);
+}
+
+/* Ẩn nội dung cũ nếu đang loading cái mới */
+.result-section.loading-analysis #pos-legend {
+    opacity: 0.3;
+    filter: blur(1px);
+}
+
+.ping-dot {
+    width: 8px;
+    height: 8px;
+    background: var(--primary-color);
+    border-radius: 50%;
+    position: relative;
+}
+
+.ping-dot::after {
+    content: '';
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    background: var(--primary-color);
+    border-radius: 50%;
+    animation: ping 1.5s infinite;
+}
+
+@keyframes ping {
+    0% {
+        transform: scale(1);
+        opacity: 0.8;
+    }
+
+    100% {
+        transform: scale(3);
+        opacity: 0;
+    }
+}
+
+@keyframes pulse {
+
+    0%,
+    100% {
+        opacity: 0.5;
+    }
+
+    50% {
+        opacity: 1;
+    }
+}
+
+/* Quick Settings Switch */
+.quick-settings {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 10px;
+    background: var(--background-dark);
+    border-radius: 10px;
+    border: 1px solid var(--border-color);
+    margin-bottom: 12px;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.settings-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.tool-buttons {
+    display: flex;
+    gap: 4px;
+    border-left: 1px solid var(--border-color);
+    padding-left: 8px;
+}
+
+.quick-settings .label {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text-color);
+}
+
+.switch {
+    position: relative;
+    display: inline-block;
+    width: 40px;
+    height: 22px;
+}
+
+.switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: var(--border-color);
+    transition: .4s;
+    border-radius: 22px;
+}
+
+.slider:before {
+    position: absolute;
+    content: "";
+    height: 16px;
+    width: 16px;
+    left: 3px;
+    bottom: 3px;
+    background-color: white;
+    transition: .4s;
+    border-radius: 50%;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+input:checked+.slider {
+    background-color: var(--primary-color);
+}
+
+input:checked+.slider:before {
+    transform: translateX(18px);
+}
+
+#error-message {
+    display: none;
+    background-color: rgba(239, 68, 68, 0.1);
+    color: var(--danger-color);
+    font-size: 0.8rem;
+    padding: 8px 12px;
+    margin-top: 10px;
+    border-radius: 6px;
+    border: 1px solid rgba(239, 68, 68, 0.2);
+    text-align: center;
+}
+
+/* POS Tag Toggle State */
+.pos-pill.disabled {
+    background-color: var(--border-color) !important;
+    color: var(--text-light) !important;
+    filter: none;
+    opacity: 0.7;
+}
+
+/* Word Detail Tooltip (Meaning) */
+.word-wrapper {
+    position: relative;
+    display: inline-block;
+}
+
+.word-token {
+    cursor: pointer;
+    padding: 2px 4px;
+    border-radius: 4px;
+    font-weight: 600;
+    transition: background 0.2s;
+}
+
+.word-token:hover {
+    background: rgba(37, 99, 235, 0.1);
+}
+
+.word-detail-tooltip {
+    position: absolute;
+    bottom: 115%; /* Kéo tooltip xuống gần chữ hơn */
+    left: 50%;
+    transform: translateX(-50%) translateY(4px);
+    background: #1e293b;
+    color: white;
+    padding: 6px 12px;
+    border-radius: 8px;
+    font-size: calc(0.75rem * var(--content-zoom));
+    width: max-content;
+    max-width: 200px;
+    white-space: normal;
+    opacity: 0;
+    visibility: hidden;
+    z-index: 100;
+    font-weight: 500;
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    pointer-events: none;
+    text-align: center;
+    line-height: 1.4;
+}
+
+.word-wrapper:hover .word-detail-tooltip,
+.word-detail-tooltip.visible {
+    opacity: 1;
+    visibility: visible;
+    transform: translateX(-50%) translateY(0);
+}
+
+/* Keyboard focus state for word tokens */
+.word-token:focus {
+    outline: 2px solid var(--primary-color);
+    outline-offset: 2px;
+    border-radius: 4px;
+}
+
+.word-detail-tooltip::after {
+    content: "";
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    margin-left: -5px;
+    border-width: 5px;
+    border-style: solid;
+    border-color: #1e293b transparent transparent transparent;
+}
+
+/* Footer Styles */
+.footer {
+    margin-top: 10px;
+    padding-top: 15px;
+    padding-bottom: 5px;
+    border-top: 1px solid var(--border-color);
+}
+
+.footer-content {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-size: 0.7rem;
+    color: var(--text-light);
+    gap: 15px;
+}
+
+.footer-links {
+    display: flex;
+    gap: 12px;
+    flex-shrink: 0;
+}
+
+.footer-links a {
+    color: var(--text-light);
+    text-decoration: none;
+    transition: color 0.2s;
+    font-weight: 500;
+    white-space: nowrap;
+}
+
+.footer-links a:hover {
+    color: var(--primary-color);
+}
+
+/* ── Save Word Button on word hover ──────────────────────────────────── */
+
+.word-wrapper {
+    position: relative;
+    display: inline-block;
+}
+
+.save-word-btn {
+    position: absolute;
+    top: -8px;
+    right: -6px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--primary-color);
+    color: white;
+    border: none;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1;
+    cursor: pointer;
+    opacity: 0;
+    transform: scale(0.6);
+    transition: opacity 0.15s, transform 0.15s;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    box-shadow: 0 2px 6px rgba(37, 99, 235, 0.3);
+}
+
+.word-wrapper:hover .save-word-btn {
+    opacity: 1;
+    transform: scale(1);
+}
+
+.save-word-btn:hover {
+    background: var(--primary-color-hover);
+    transform: scale(1.15) !important;
+}
+
+.save-word-btn.saved {
+    background: var(--success-color);
+    opacity: 1;
+    transform: scale(1);
+    pointer-events: none;
+}
+
+/* ── Flashcard Section (Đồng bộ phong cách Card trắng) ───────────────── */
+
+#flashcard-section {
+    background: var(--card-background);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 15px;
+    margin-bottom: 15px;
+}
+
+#flashcard-section .section-label {
+    color: var(--text-light); /* Chuyển về màu xám chuẩn thay vì màu trắng */
+    margin-bottom: 10px;
+}
+
+#flashcard-do-now-btn {
+    background: var(--primary-color);
+    color: white;
+    border: none;
+    padding: 6px 14px;
+    border-radius: 8px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 2px 6px rgba(37, 99, 235, 0.15);
+}
+
+#flashcard-do-now-btn:hover:not(:disabled) {
+    background: var(--primary-color-hover);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25);
+}
+
+#flashcard-do-now-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+}
+
+/* ── Notification Panel (Gọn gàng và tinh tế) ───────────────────────── */
+
+#notification-panel {
+    background: var(--background-dark); /* Nền xám nhạt để phân biệt với card chính */
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 12px;
+    margin-top: 10px;
+    position: relative;
+}
+
+/* Đường kẻ nhấn bên trái thay vì border-left dày màu cam */
+#notification-panel::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 12px;
+    bottom: 12px;
+    width: 3px;
+    background: var(--primary-color);
+    border-radius: 0 4px 4px 0;
+}
+
+#notification-panel .section-label {
+    color: var(--primary-color);
+    font-weight: 700;
+}
+
+#notification-content {
+    color: var(--text-color);
+    font-size: 0.75rem;
+    line-height: 1.4;
+    padding: 6px 0 10px 0;
+}
+
+#notification-close-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-light);
+    font-size: 14px;
+    cursor: pointer;
+    padding: 0;
+    transition: color 0.2s ease;
+}
+
+#notification-close-btn:hover {
+    color: var(--danger-color);
+}
+
+#notification-actions {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.notification-action-btn {
+    background: var(--card-background);
+    color: var(--text-color);
+    border: 1px solid var(--border-color);
+    padding: 6px 10px;
+    border-radius: 6px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.notification-action-btn:hover {
+    border-color: var(--primary-color);
+    color: var(--primary-color);
+    background: white;
+}
+
+.notification-action-btn:active {
+    transform: scale(0.97);
+}
+
+/* Nút tắt trang web có màu đỏ cảnh báo nhẹ */
+#notification-disable-site-btn, 
+.notification-action-btn.danger {
+    color: var(--danger-color);
+}
+
+#notification-disable-site-btn:hover,
+.notification-action-btn.danger:hover {
+    background: rgba(239, 68, 68, 0.05);
+    border-color: var(--danger-color);
+}
