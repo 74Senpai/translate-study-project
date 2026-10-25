@@ -59,11 +59,12 @@ class DynamicGenerator:
         - Trên 0  : choice, listen_choice
         - Trên 20 : + complete (hoàn thành từ còn thiếu)
         - Trên 30 : + fill (viết tiếng Anh theo nghĩa), listen_write
+        - Trên 40 : + listen_write_vi, context_def_choice (chọn định nghĩa tiếng Anh trong câu)
         - Trên 50 : + def_choice (cho định nghĩa, chọn từ)
         - Trên 60 : + def_write (cho định nghĩa, viết từ)
         - Trên 70 : + context_def_vi (từ trong câu, viết nghĩa VI)
         - Trên 80 : + context_def_en (từ trong câu, viết nghĩa EN)
-        Chọn dạng thách thức nhất trong giao của proficiency_allowed và allowed_task_types.
+        Chọn dạng thử thách phù hợp trong giao của proficiency_allowed và allowed_task_types.
         """
         proficiency_allowed: List[str] = ["choice"]
 
@@ -73,6 +74,10 @@ class DynamicGenerator:
             proficiency_allowed.append("complete")
         if proficiency >= 30:
             proficiency_allowed += ["fill", "listen_write"]
+        if proficiency >= 40:
+            proficiency_allowed.append("listen_write_vi")
+            if has_context and has_definition_en:
+                proficiency_allowed.append("context_def_choice")
         if proficiency >= 50 and has_definition_en:
             proficiency_allowed.append("def_choice")
         if proficiency >= 60 and has_definition_en:
@@ -82,10 +87,14 @@ class DynamicGenerator:
         if proficiency >= 80 and has_context:
             proficiency_allowed.append("context_def_en")
 
-        # Giao với allowed_task_types của bộ thẻ — ưu tiên dạng thách thức nhất (cuối danh sách)
+        # Giao với allowed_task_types của bộ thẻ
         candidates = [t for t in proficiency_allowed if t in allowed_task_types]
         if candidates:
-            return candidates[-1]
+            if len(candidates) == 1:
+                return candidates[0]
+            # Phân bổ trọng số: 50% dạng thử thách cao nhất, 50% chia đều cho các dạng còn lại để tạo độ đa dạng
+            weights = [0.5 / (len(candidates) - 1)] * (len(candidates) - 1) + [0.5]
+            return random.choices(candidates, weights=weights, k=1)[0]
 
         # Fallback theo thứ tự ưu tiên cơ bản
         for t in ["choice", "fill", "complete"]:
@@ -106,11 +115,13 @@ class DynamicGenerator:
         Sinh câu hỏi phù hợp với task_type đã chọn — KHÔNG tiết lộ đáp án:
         - choice      : hỏi nghĩa của từ (hiện từ, đáp án là nghĩa VI)
         - fill        : hỏi dịch sang tiếng Anh (hiện nghĩa VI, đáp án là từ tiếng Anh)
-        - complete    : hỏi điền chữ còn thiếu (không hiện từ đầy đủ)
+        - complete    : hỏi điền chữ còn thiếu (không hiện từ đầy đủ, kèm nghĩa VI)
         - listen_choice: nghe từ → chọn nghĩa tiếng Việt
-        - listen_write : nghe từ → viết từ tiếng Anh
+        - listen_write : nghe từ → viết từ tiếng Anh (kèm nghĩa VI)
+        - listen_write_vi: nghe từ → viết nghĩa tiếng Việt
         - def_choice  : cho định nghĩa → chọn từ tiếng Anh
         - def_write   : cho định nghĩa → viết từ tiếng Anh
+        - context_def_choice: câu ví dụ → chọn định nghĩa tiếng Anh phù hợp
         - context_def_vi: từ trong câu → viết định nghĩa tiếng Việt
         - context_def_en: từ trong câu → viết định nghĩa tiếng Anh
         """
@@ -139,7 +150,12 @@ class DynamicGenerator:
                 return f'Nghe và viết lại từ tiếng Anh (Nghĩa: "{clean_meaning}")'
             return "Nghe từ tiếng Anh và viết lại từ đó"
 
-        elif task_type == "def_choice":
+        elif task_type == "listen_write_vi":
+            return "Nghe từ tiếng Anh và viết nghĩa tiếng Việt của từ"
+
+        elif task_type in ("def_choice", "context_def_choice"):
+            if context and context.strip() and task_type == "context_def_choice":
+                return f'Trong câu ví dụ "{context}", từ "{word}" có định nghĩa tiếng Anh nào phù hợp nhất?'
             def_text = definition_en or definition_vi or ""
             if def_text:
                 return f'Định nghĩa: "{def_text}" — Từ tiếng Anh nào phù hợp?'
@@ -227,8 +243,8 @@ class DynamicGenerator:
                 "answers": [word.strip().lower()]
             }
 
-        # def_choice: cho định nghĩa → chọn từ tiếng Anh
-        if definition_en and (proficiency >= 50 or "def_choice" in allowed_task_types):
+        # def_choice / context_def_choice: cho định nghĩa → chọn từ tiếng Anh
+        if definition_en and (proficiency >= 50 or "def_choice" in allowed_task_types or "context_def_choice" in allowed_task_types):
             en_distractors = word_distractors or []
             tasks["def_choice"] = {
                 "enabled": True,
@@ -244,6 +260,20 @@ class DynamicGenerator:
             tasks["def_write"] = {
                 "enabled": True,
                 "answers": [word.strip().lower()]
+            }
+
+        # context_def_vi: cho từ trong câu → viết định nghĩa tiếng Việt
+        if proficiency >= 70 or "context_def_vi" in allowed_task_types:
+            tasks["context_def_vi"] = {
+                "enabled": True,
+                "answers": [meaning.strip().lower()]
+            }
+
+        # context_def_en: cho từ trong câu → viết định nghĩa tiếng Anh
+        if definition_en and (proficiency >= 80 or "context_def_en" in allowed_task_types):
+            tasks["context_def_en"] = {
+                "enabled": True,
+                "answers": [definition_en.strip().lower()]
             }
 
         return tasks
@@ -389,42 +419,66 @@ class DynamicGenerator:
             item["next_review"] = p_data.get("next_review")
             item["attempts"] = item.get("encountered_count", 0) + item.get("translated_count", 0)
 
-        # 4. Sắp xếp theo cấu hình ưu tiên Leitner (Mục 3 spec)
-        p = leitner.priority
-        if p == "translate_desc":
-            words_data.sort(key=lambda x: x.get("translated_count", 0), reverse=True)
-        elif p == "translate_asc":
-            words_data.sort(key=lambda x: x.get("translated_count", 0))
-        elif p == "encounter_desc":
-            words_data.sort(key=lambda x: x.get("encountered_count", 0), reverse=True)
-        elif p == "encounter_asc":
-            words_data.sort(key=lambda x: x.get("encountered_count", 0))
-        elif p == "total_asc":
-            words_data.sort(key=lambda x: x.get("translated_count", 0) + x.get("encountered_count", 0))
-        elif p == "due_first":
-            words_data.sort(key=lambda x: (x.get("next_review") or "") > now_iso)
-        else:  # default total_desc
-            words_data.sort(key=lambda x: x.get("translated_count", 0) + x.get("encountered_count", 0), reverse=True)
-
-        # 5. Lọc theo ngưỡng thông thạo: ưu tiên các từ trong ngưỡng trước, nếu chưa đủ total_cards thì bổ sung các từ khác của user
+        # 4. Sắp xếp & Lọc theo Leitner Spaced Repetition (Box interval) + Ngưỡng thông thạo + Cấu hình ưu tiên
+        now_iso = datetime.now(timezone.utc).isoformat()
         min_th = leitner.min_threshold
         max_th = leitner.max_threshold
 
-        sense_words = [item for item in words_data if item.get("sense")]
-        primary_words = [
-            w for w in sense_words
-            if min_th <= w.get("proficiency", 0.0) <= max_th
-        ]
+        def is_due(item: Dict[str, Any]) -> bool:
+            """Kiểm tra từ đã đến ngày ôn tập (due) theo box interval hay chưa."""
+            nr = item.get("next_review")
+            if not nr:
+                return True  # Từ mới chưa ôn hoặc chưa có lịch -> sẵn sàng ôn tập
+            try:
+                return str(nr) <= now_iso
+            except Exception:
+                return True
 
-        if len(primary_words) >= total_cards:
-            selected_words = primary_words[:total_cards]
+        def get_priority_val(item: Dict[str, Any]) -> float:
+            """Tính điểm ưu tiên theo cấu hình leitner.priority."""
+            p = leitner.priority
+            if p in ("translate_desc", "translated_desc"):
+                return float(item.get("translated_count", 0))
+            elif p in ("translate_asc", "translated_asc"):
+                return -float(item.get("translated_count", 0))
+            elif p in ("encounter_desc", "encountered_desc", "match_desc"):
+                return float(item.get("encountered_count", 0))
+            elif p in ("encounter_asc", "encountered_asc", "match_asc"):
+                return -float(item.get("encountered_count", 0))
+            elif p == "total_asc":
+                return -float(item.get("translated_count", 0) + item.get("encountered_count", 0))
+            elif p == "due_first":
+                return 0.0
+            else:  # default: total_desc (dịch + gặp nhiều nhất)
+                return float(item.get("translated_count", 0) + item.get("encountered_count", 0))
+
+        sense_words = [item for item in words_data if item.get("sense")]
+
+        # Phân chia 4 tầng ưu tiên:
+        # Tier 1: Nằm trong ngưỡng thông thạo VÀ đến hạn ôn tập (Leitner SRS due)
+        tier1 = [w for w in sense_words if (min_th <= w.get("proficiency", 0.0) <= max_th) and is_due(w)]
+        # Tier 2: Nằm trong ngưỡng thông thạo nhưng chưa tới ngày ôn (ôn sớm)
+        tier2 = [w for w in sense_words if (min_th <= w.get("proficiency", 0.0) <= max_th) and not is_due(w)]
+        # Tier 3: Các từ khác của user đến hạn ôn tập
+        tier1_2_words = {w["word"].lower() for w in (tier1 + tier2)}
+        tier3 = [w for w in sense_words if w["word"].lower() not in tier1_2_words and is_due(w)]
+        # Tier 4: Các từ khác của user chưa tới ngày ôn
+        tier4 = [w for w in sense_words if w["word"].lower() not in tier1_2_words and not is_due(w)]
+
+        # Sắp xếp nội bộ từng nhóm theo cấu hình ưu tiên của bộ thẻ
+        if leitner.priority == "due_first":
+            tier1.sort(key=lambda x: str(x.get("next_review") or ""))
+            tier2.sort(key=lambda x: str(x.get("next_review") or ""))
+            tier3.sort(key=lambda x: str(x.get("next_review") or ""))
+            tier4.sort(key=lambda x: str(x.get("next_review") or ""))
         else:
-            primary_words_set = {w["word"].lower() for w in primary_words}
-            secondary_words = [
-                w for w in sense_words
-                if w["word"].lower() not in primary_words_set
-            ]
-            selected_words = (primary_words + secondary_words)[:total_cards]
+            tier1.sort(key=get_priority_val, reverse=True)
+            tier2.sort(key=get_priority_val, reverse=True)
+            tier3.sort(key=get_priority_val, reverse=True)
+            tier4.sort(key=get_priority_val, reverse=True)
+
+        # Lựa chọn danh sách từ cho phiên học (đảm bảo đủ số lượng thẻ mong muốn)
+        selected_words = (tier1 + tier2 + tier3 + tier4)[:total_cards]
 
         # 6. Build choices & distractors
         available_meanings = list(dict.fromkeys(
