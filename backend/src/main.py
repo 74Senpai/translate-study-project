@@ -12,6 +12,7 @@ from src.api.health.router import router as health_router
 from src.api.client.router import router as client_router
 from src.api.admin.router import router as admin_router
 from src.auth.routers.auth_router import router as auth_router
+from src.api.user.router import router as user_router
 from src.flashcard.routers.flashcard_router import router as flashcard_router
 from src.routers import router as router_v2
 from src.config import get_settings
@@ -101,15 +102,18 @@ def create_app() -> FastAPI:
     app.include_router(client_router)
     app.include_router(admin_router)
     app.include_router(auth_router)   # /auth/callback, /auth/refresh, /auth/me, /auth/logout
+    app.include_router(user_router)   # /user/profile, /user/words, /user/avatar
+    app.include_router(user_router, prefix="/api")
+    app.include_router(user_router, prefix="/api/v1")
     app.include_router(flashcard_router)
     app.include_router(flashcard_router, prefix="/api/admin")
     app.include_router(router_v2)
 
-    # Static file mounting if static folder exists
+    # Static file mounting
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     static_path = os.path.join(base_dir, "static")
-    if os.path.exists(static_path):
-        app.mount("/static", StaticFiles(directory=static_path), name="static")
+    os.makedirs(static_path, exist_ok=True)
+    app.mount("/static", StaticFiles(directory=static_path), name="static")
 
     @app.get("/favicon.ico", include_in_schema=False)
     async def favicon():

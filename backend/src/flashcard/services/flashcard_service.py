@@ -439,7 +439,11 @@ class FlashcardService:
                     has_context=has_ctx,
                     has_definition_en=has_def,
                 )
-            if not card.question_text:
+            # Với dạng viết từ hoặc hoàn thành từ: Luôn build câu hỏi có kèm nghĩa của từ
+            is_write_or_complete = card.selected_task_type in (
+                "fill", "complete", "listen_write", "def_write"
+            )
+            if not card.question_text or is_write_or_complete:
                 card.question_text = DynamicGenerator._build_question_text(
                     task_type=card.selected_task_type,
                     word=card.word,
@@ -498,12 +502,116 @@ class FlashcardService:
         Chấm điểm câu trả lời và cập nhật theo Mục 4 Specification:
         - Đúng: +1..+10 điểm thông thạo (giảm dần theo thời gian trả lời).
         - Sai: -1..-10 điểm thông thạo (tính theo số lần gặp, dịch và độ dài chữ tiếng Anh).
-        - Ghi nhận từ tiếng Anh xuất hiện trong câu trả lời vào kho từ user.
-        - Tăng / reset Leitner Box.
-        - Cập nhật Supabase user_sense_stats & user_sense_progress.
+        - Mỗi từ xuất hiện (câu hỏi/đáp án) ghi nhận vào kho user, tăng match_count.
+        - Tăng translated_count khi trả lời đúng.
+        - Tăng / reset Leitner Box theo nguyên lý SRS.
+        - Cập nhật Supabase user_sense_progress.
         """
-        # 1. Ghi nhận từ tiếng Anh xuất hiện trong câu trả lời
-        user_answer_str = str(req.user_answer)
+        # Validate word
+        if not req.word or not req.word.strip():
+            raise HTTPException(status_code=400, detail="Thiếu từ vựng cần chấm điểm.")
+
+        # 1. Ghi nhận từ tiếng Anh xuất hiện trong câu trả lời (tăng match_count theo spec mục 4)
+        user_answer_str = str(req.user_answer) if req.user_answer is not None else ""
+        await self.repo.record_english_words_exposure(
+            user_id=user_id,
+            text=f"{req.word} {user_answer_str}",
+            is_answer=True
+        )
+
+        # 2. Tính điểm cộng hoặc điểm trừ
+        points_earned = 0
+        new_prof = 0.0
+        leitner_box = 1
+        bonus_toast = None
+        word_stats = None
+
+        time_limit = req.time_limit if req.time_limit and req.time_limit > 0 else 15.0
+
+        if req.is_correct:
+            points_earned = ScoringEngine.calculate_correct_score(
+                time_spent=req.time_spent,
+                time_limit=time_limit
+            )
+            feedback = "Chính xác! Làm rất tốt."
+        else:
+            # Lấy thông tin gặp/dịch từ request hoặc DB để tính penalty đúng theo spec
+            encountered_count = req.encounter_count if req.encounter_count is not None else 0
+            translated_count = req.translate_count if req.translate_count is not None else 0
+
+            if user_id and encountered_count == 0 and translated_count == 0:
+                prof_data = await self.repo.get_user_word_proficiency(user_id, req.word)
+                encountered_count = prof_data.get("attempts", 0)
+
+            penalty = ScoringEngine.calculate_incorrect_penalty(
+                encountered_count=encountered_count,
+                translated_count=translated_count,
+                word=req.word
+            )
+            points_earned = -int(round(penalty))
+            feedback = f"Chưa chính xác. Hãy ghi nhớ từ '{req.word}' nhé!"
+
+        # 3. Cập nhật tiến trình Leitner & điểm thông thạo của từ
+        if user_id:
+            res = await self.repo.update_user_word_proficiency(
+                user_id=user_id,
+                word=req.word,
+                delta=points_earned,
+                is_correct=req.is_correct
+            )
+            new_prof = res["proficiency"]
+            leitner_box = res["leitner_box"]
+
+            # Tăng translated_count khi trả lời đúng (spec mục 4: dịch nhiều → giảm penalty ít hơn)
+            if req.is_correct:
+                asyncio.create_task(
+                    self.repo.increment_word_translate_count(user_id=user_id, word=req.word)
+                )
+
+            word_stats = {
+                "word": req.word,
+                "new_proficiency": new_prof,
+                "leitner_box": leitner_box,
+                "attempts": res.get("attempts", 0),
+                "correct_count": res.get("correct_count", 0),
+                "next_review": res.get("next_review"),
+            }
+
+            if new_prof >= 100:
+                bonus_toast = {
+                    "type": "mastered",
+                    "title": "Thành thạo từ vựng!",
+                    "message": f"Bạn đã hoàn toàn làm chủ từ '{req.word}'!",
+                }
+            elif new_prof >= 50 and points_earned > 0:
+                bonus_toast = {
+                    "type": "milestone",
+                    "title": "Tiến bộ xuất sắc!",
+                    "message": f"Từ '{req.word}' đã đạt mức thành thạo {new_prof:.0f}/100!",
+                }
+
+        # 4. Cập nhật phiên học trong Supabase
+        current_streak = 0
+        if req.session_id:
+            sess = await self.repo.get_session(req.session_id)
+            if sess:
+                current_streak = (sess.get("streak", 0) + 1) if req.is_correct else 0
+                await self.repo.update_session(req.session_id, {
+                    "score": sess.get("score", 0) + max(0, points_earned),
+                    "streak": current_streak
+                })
+
+        return SubmitAnswerResponse(
+            is_correct=req.is_correct,
+            points_earned=points_earned,
+            streak=current_streak,
+            new_proficiency=new_prof,
+            feedback=feedback,
+            leitner_box=leitner_box,
+            bonus_toast=bonus_toast,
+            word_stats=word_stats
+        )
+
         await self.repo.record_english_words_exposure(
             user_id=user_id,
             text=f"{req.word} {user_answer_str}",

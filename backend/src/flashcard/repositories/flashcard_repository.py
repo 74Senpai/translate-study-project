@@ -812,6 +812,45 @@ class FlashcardRepository:
 
         return words
 
+    async def increment_word_translate_count(self, user_id: str, word: str) -> None:
+        """
+        Tăng số lần dịch (translated_count) của từ trong kho của user khi trả lời đúng (theo spec mục 4).
+        """
+        if not user_id or not word or self.supabase is None:
+            return
+        clean_w = word.strip().lower()
+        now_iso = datetime.now(timezone.utc).isoformat()
+        try:
+            # 1. Update user_word_statistics
+            stat_rec = self.supabase.table("user_word_statistics").select(
+                "id, translated_count, total_count"
+            ).eq("user_id", user_id).eq("word", clean_w).maybe_single().execute()
+            if stat_rec and stat_rec.data:
+                s_id = stat_rec.data["id"]
+                trans = stat_rec.data.get("translated_count", 0) + 1
+                tot = stat_rec.data.get("total_count", 0) + 1
+                self.supabase.table("user_word_statistics").update({
+                    "translated_count": trans,
+                    "total_count": tot,
+                    "last_seen": now_iso,
+                    "updated_at": now_iso
+                }).eq("id", s_id).execute()
+
+            # 2. Update user_words nếu từ đã tồn tại
+            word_rec = self.supabase.table("words").select("id").eq("word_text", clean_w).maybe_single().execute()
+            if word_rec and word_rec.data:
+                w_id = word_rec.data.get("id")
+                uw_rec = self.supabase.table("user_words").select("id, translated_count").eq("user_id", user_id).eq("word_id", w_id).maybe_single().execute()
+                if uw_rec and uw_rec.data:
+                    uw_id = uw_rec.data["id"]
+                    curr_trans = uw_rec.data.get("translated_count", 0) + 1
+                    self.supabase.table("user_words").update({
+                        "translated_count": curr_trans,
+                        "updated_at": now_iso
+                    }).eq("id", uw_id).execute()
+        except Exception as e:
+            logger.debug(f"increment_word_translate_count notice for '{clean_w}': {e}")
+
     # ── DICTIONARY CACHE FOR FLASHCARD IMPORT ─────────────────────────────────
 
     async def get_dictionary_cache(

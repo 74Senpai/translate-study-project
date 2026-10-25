@@ -244,16 +244,83 @@ class FlashcardSessionStartResponse(BaseModel):
 
 
 class SubmitAnswerRequest(BaseModel):
+    model_config = {"extra": "ignore"}
+
     session_id: Optional[str] = None
     set_id: Optional[str] = None
-    card_id: str
-    word: str
+    card_id: Optional[str] = ""
+    word: str = ""
     sense_id: Optional[str] = None
-    user_answer: Any
-    is_correct: bool
-    task_type: str
-    time_spent: float = 0.0  # seconds
-    time_limit: float = 15.0  # seconds
+    user_answer: Any = None
+    is_correct: bool = False
+    task_type: str = "choice"
+    time_spent: float = 0.0  # giây đã dùng trả lời
+    time_limit: float = 15.0  # giới hạn thời gian mỗi câu
+    # Thông tin gặp / dịch từ được truyền từ frontend để cập nhật match_count đúng theo spec
+    encounter_count: Optional[int] = None  # số lần gặp (match_count) hiện tại của từ
+    translate_count: Optional[int] = None  # số lần dịch của từ (translated_count)
+
+    @field_validator("card_id", mode="before")
+    @classmethod
+    def parse_card_id(cls, v):
+        if v is None:
+            return ""
+        return str(v)
+
+    @field_validator("word", mode="before")
+    @classmethod
+    def parse_word(cls, v):
+        if not v:
+            return ""
+        return str(v).strip()
+
+    @field_validator("is_correct", mode="before")
+    @classmethod
+    def parse_is_correct(cls, v):
+        if isinstance(v, bool):
+            return v
+        if isinstance(v, (int, float)):
+            return bool(v)
+        if isinstance(v, str):
+            return v.lower() in ("true", "1", "yes")
+        return False
+
+    @field_validator("task_type", mode="before")
+    @classmethod
+    def parse_task_type(cls, v):
+        if not v:
+            return "choice"
+        valid_types = {
+            "choice", "fill", "complete", "listen_choice", "listen_write",
+            "def_choice", "def_write", "context_def_vi", "context_def_en",
+            "listen_choice_vi", "listen_write_vi", "context_def_en_write", "multiple_choice"
+        }
+        t = str(v).strip().lower()
+        return t if t in valid_types else "choice"
+
+    @field_validator("time_spent", "time_limit", mode="before")
+    @classmethod
+    def parse_float_safe(cls, v):
+        if v is None or v == "":
+            return 0.0
+        try:
+            return max(0.0, float(v))
+        except (ValueError, TypeError):
+            return 0.0
+
+    @field_validator("sense_id", mode="before")
+    @classmethod
+    def parse_sense_id(cls, v):
+        if not v or str(v).strip() == "":
+            return None
+        return str(v).strip()
+
+    @field_validator("session_id", "set_id", mode="before")
+    @classmethod
+    def parse_optional_str(cls, v):
+        if not v or str(v).strip() == "":
+            return None
+        return str(v).strip()
 
 
 class SubmitAnswerResponse(BaseModel):
@@ -264,6 +331,8 @@ class SubmitAnswerResponse(BaseModel):
     feedback: str
     leitner_box: int
     bonus_toast: Optional[Dict[str, Any]] = None
+    # Thông tin cập nhật từ để hiển thị trên UI (theo spec mục 4)
+    word_stats: Optional[Dict[str, Any]] = None
 
 
 class SessionCompletedRequest(BaseModel):

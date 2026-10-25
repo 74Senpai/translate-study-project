@@ -2137,20 +2137,24 @@ export default function FlashcardPlayerPage() {
     if (activeTaskType === "choice") return `Nghĩa của từ "${card?.word || "..."}" là gì?`;
     if (activeTaskType === "fill" && hasFillSafeQuestion) return customQuestion;
     if (activeTaskType === "fill")
-      return `Dịch sang ${
-        (card?.word || "").match(/^[a-zA-Z\s]+$/) ? "tiếng Anh" : "tiếng Việt"
-      }: "${card?.meaning || "..."}"`;
+      return `Viết từ tiếng Anh có nghĩa là: "${card?.meaning || "..."}"`;
+    if (activeTaskType === "complete")
+      return `Hoàn thành từ có nghĩa là: "${card?.meaning || "..."}"`;
     if (activeTaskType === "listen_choice") return "Nghe từ tiếng Anh và chọn nghĩa tiếng Việt đúng";
-    if (activeTaskType === "listen_write") return "Nghe từ tiếng Anh và viết lại từ đó";
+    if (activeTaskType === "listen_write")
+      return `Nghe và viết lại từ tiếng Anh${card?.meaning ? ` (Nghĩa: "${card.meaning}")` : ""}`;
     if (activeTaskType === "def_choice") return `Cho định nghĩa, chọn từ tiếng Anh phù hợp`;
-    if (activeTaskType === "def_write") return `Cho định nghĩa, viết từ tiếng Anh tương ứng`;
+    if (activeTaskType === "def_write")
+      return `Cho định nghĩa, viết từ tiếng Anh tương ứng${card?.meaning ? ` (Nghĩa: "${card.meaning}")` : ""}`;
     if (activeTaskType === "context_def_vi") return `Viết định nghĩa tiếng Việt của từ "${card?.word}"`;
     if (activeTaskType === "context_def_en") return `Viết định nghĩa tiếng Anh của từ "${card?.word}"`;
-    return "Điền chữ cái còn thiếu để hoàn thành từ";
+    return `Hoàn thành từ có nghĩa là: "${card?.meaning || "..."}"`;
   };
 
-  // Backend question_text là nguồn chính xác khi task type khớp; fallback về getBackendFallbackQuestion nếu đã đổi dạng (ví dụ do canListen=false)
-  const taskQuestion = (activeTaskType === card?.selected_task_type && card?.question_text?.trim())
+  // Backend question_text là nguồn chính xác khi task type khớp; nếu là dạng viết/hoàn thành mà chưa có nghĩa thì dùng fallback có kèm nghĩa
+  const isWriteOrComplete = activeTaskType === "complete" || activeTaskType === "fill" || activeTaskType === "listen_write" || activeTaskType === "def_write";
+  const hasMeaningInQuestion = card?.meaning && card?.question_text && card.question_text.includes(card.meaning);
+  const taskQuestion = (activeTaskType === card?.selected_task_type && card?.question_text?.trim() && (!isWriteOrComplete || hasMeaningInQuestion))
     ? card.question_text.trim()
     : getBackendFallbackQuestion();
   if (!card && (gameState === "playing" || gameState === "feedback")) {
@@ -2490,12 +2494,22 @@ export default function FlashcardPlayerPage() {
                     className="relative flex flex-col items-center gap-4 md:gap-6"
                   >
                     <div className="w-full flex items-center justify-between mb-2">
-                      {/* Dynamic Hint on the left */}
-                      <div className="flex items-center gap-2">
+                      {/* Meaning & Dynamic Hint on the left */}
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {card?.meaning && (
+                          <div className="flex items-center gap-1.5 px-3 py-1 bg-indigo-50 rounded-full border border-indigo-100">
+                            <span className="text-[10px] font-black text-indigo-500 uppercase tracking-widest">
+                              Nghĩa:
+                            </span>
+                            <span className="text-xs font-bold text-slate-800">
+                              {card.meaning}
+                            </span>
+                          </div>
+                        )}
                         {dynamicHint && (
-                          <div className="flex items-center gap-1.5 px-3 py-1 bg-indigo-50 rounded-full border border-indigo-100 animate-in fade-in slide-in-from-left-2 transition-all">
-                            <Sparkles className="w-3 h-3 text-indigo-400" />
-                            <span className="text-[9px] font-black text-indigo-600 uppercase tracking-widest">
+                          <div className="flex items-center gap-1.5 px-3 py-1 bg-purple-50 rounded-full border border-purple-100 animate-in fade-in slide-in-from-left-2 transition-all">
+                            <Sparkles className="w-3 h-3 text-purple-400" />
+                            <span className="text-[9px] font-black text-purple-600 uppercase tracking-widest">
                               {dynamicHint}
                             </span>
                           </div>
@@ -2546,12 +2560,22 @@ export default function FlashcardPlayerPage() {
                     className="relative flex flex-col items-center gap-4 md:gap-6"
                   >
                     <div className="w-full flex items-center justify-between mb-2">
-                      {/* Dynamic Hint on the left */}
-                      <div className="flex items-center gap-2">
+                      {/* Meaning & Dynamic Hint on the left */}
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {card?.meaning && (
+                          <div className="flex items-center gap-1.5 px-3.5 py-1 bg-indigo-50 rounded-full border border-indigo-100">
+                            <span className="text-[10px] font-black text-indigo-500 uppercase tracking-widest">
+                              Nghĩa:
+                            </span>
+                            <span className="text-xs font-bold text-slate-800">
+                              {card.meaning}
+                            </span>
+                          </div>
+                        )}
                         {dynamicHint && (
-                          <div className="flex items-center gap-1.5 px-3 py-1 bg-indigo-50 rounded-full border border-indigo-100 animate-in fade-in slide-in-from-left-2 transition-all">
-                            <Sparkles className="w-3 h-3 text-indigo-400" />
-                            <span className="text-[9px] font-black text-indigo-600 uppercase tracking-widest">
+                          <div className="flex items-center gap-1.5 px-3 py-1 bg-purple-50 rounded-full border border-purple-100 animate-in fade-in slide-in-from-left-2 transition-all">
+                            <Sparkles className="w-3 h-3 text-purple-400" />
+                            <span className="text-[9px] font-black text-purple-600 uppercase tracking-widest">
                               {dynamicHint}
                             </span>
                           </div>

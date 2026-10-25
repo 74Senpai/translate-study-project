@@ -114,21 +114,29 @@ class DynamicGenerator:
         - context_def_vi: từ trong câu → viết định nghĩa tiếng Việt
         - context_def_en: từ trong câu → viết định nghĩa tiếng Anh
         """
+        clean_meaning = (meaning or "").strip()
+
         if task_type == "choice":
             if context and context.strip():
                 return f'Trong câu ví dụ, từ "{word}" có nghĩa nào phù hợp nhất?'
             return f'Nghĩa của từ "{word}" là gì?'
 
         elif task_type == "fill":
-            return f'Dịch sang tiếng Anh: "{meaning}"'
+            if clean_meaning:
+                return f'Viết từ tiếng Anh có nghĩa là: "{clean_meaning}"'
+            return "Viết từ tiếng Anh tương ứng"
 
         elif task_type == "complete":
+            if clean_meaning:
+                return f'Hoàn thành từ có nghĩa là: "{clean_meaning}"'
             return "Điền các chữ cái còn thiếu để hoàn thành từ"
 
         elif task_type == "listen_choice":
             return "Nghe từ tiếng Anh và chọn nghĩa tiếng Việt đúng"
 
         elif task_type == "listen_write":
+            if clean_meaning:
+                return f'Nghe và viết lại từ tiếng Anh (Nghĩa: "{clean_meaning}")'
             return "Nghe từ tiếng Anh và viết lại từ đó"
 
         elif task_type == "def_choice":
@@ -139,8 +147,12 @@ class DynamicGenerator:
 
         elif task_type == "def_write":
             def_text = definition_en or definition_vi or ""
-            if def_text:
+            if def_text and clean_meaning:
+                return f'Định nghĩa: "{def_text}" (Nghĩa: "{clean_meaning}") — Viết từ tiếng Anh tương ứng'
+            elif def_text:
                 return f'Định nghĩa: "{def_text}" — Viết từ tiếng Anh tương ứng'
+            elif clean_meaning:
+                return f'Viết từ tiếng Anh có nghĩa là: "{clean_meaning}"'
             return "Viết từ tiếng Anh phù hợp với định nghĩa trên"
 
         elif task_type == "context_def_vi":
@@ -304,94 +316,137 @@ class DynamicGenerator:
             except Exception as e:
                 logger.debug(f"Error querying user_word_statistics: {e}")
 
-        # 3. Lấy điểm thông thạo, Leitner box & hạn ôn tập từ user_sense_progress (Supabase)
+        # 3. Batch query: Lấy senses & word_id nhanh chóng cho toàn bộ từ
+        # 3.1 Tìm word_id còn thiếu
+        missing_texts = [w["word"].lower() for w in words_data if not w.get("word_id")]
+        word_id_map = {}
+        if missing_texts and supabase_client:
+            try:
+                for i in range(0, len(missing_texts), 50):
+                    chunk = missing_texts[i:i + 50]
+                    w_res = supabase_client.table("words").select("id, word_text").in_("word_text", chunk).execute()
+                    if w_res and w_res.data:
+                        for row in w_res.data:
+                            word_id_map[row["word_text"].lower()] = row["id"]
+            except Exception as e:
+                logger.debug(f"Batch fetch words error: {e}")
+
         for item in words_data:
-            w = item["word"]
-            item["proficiency"] = 0.0
-            item["leitner_box"] = 1
+            if not item.get("word_id") and item["word"].lower() in word_id_map:
+                item["word_id"] = word_id_map[item["word"].lower()]
+
+        all_word_ids = [w["word_id"] for w in words_data if w.get("word_id")]
+
+        # 3.2 Batch query lấy senses
+        senses_by_word_id = {}
+        if all_word_ids and supabase_client:
+            try:
+                for i in range(0, len(all_word_ids), 50):
+                    chunk = all_word_ids[i:i + 50]
+                    s_res = supabase_client.table("senses").select(
+                        "id, word_id, meaning_vi, ipa, definition_en, definition_vi, example_en"
+                    ).in_("word_id", chunk).execute()
+                    if s_res and s_res.data:
+                        for s in s_res.data:
+                            wid = s.get("word_id")
+                            if wid not in senses_by_word_id:
+                                senses_by_word_id[wid] = []
+                            senses_by_word_id[wid].append(s)
+            except Exception as e:
+                logger.debug(f"Batch fetch senses error: {e}")
+
+        all_sense_ids = []
+        for item in words_data:
+            wid = item.get("word_id")
+            s_list = senses_by_word_id.get(wid, [])
+            valid_senses = [s for s in s_list if str(s.get("meaning_vi") or "").strip()]
+            if valid_senses:
+                best_sense = max(valid_senses, key=lambda s: bool(str(s.get("example_en") or "").strip()))
+                item["sense"] = best_sense
+                item["sense_id"] = best_sense.get("id")
+                all_sense_ids.append(best_sense.get("id"))
+
+        # 3.3 Batch query lấy user_sense_progress (Điểm thông thạo & Leitner Box)
+        progress_by_sense_id = {}
+        if all_sense_ids and supabase_client:
+            try:
+                for i in range(0, len(all_sense_ids), 50):
+                    chunk = all_sense_ids[i:i + 50]
+                    p_res = supabase_client.table("user_sense_progress").select(
+                        "sense_id, mastery_score, current_repetition_id, next_review, wrong_count"
+                    ).eq("user_id", user_id).in_("sense_id", chunk).execute()
+                    if p_res and p_res.data:
+                        for p in p_res.data:
+                            progress_by_sense_id[p["sense_id"]] = p
+            except Exception as e:
+                logger.debug(f"Batch fetch progress error: {e}")
+
+        for item in words_data:
+            sid = item.get("sense_id")
+            p_data = progress_by_sense_id.get(sid, {})
+            item["proficiency"] = p_data.get("mastery_score", 0.0)
+            item["leitner_box"] = p_data.get("current_repetition_id") or 1
+            item["next_review"] = p_data.get("next_review")
             item["attempts"] = item.get("encountered_count", 0) + item.get("translated_count", 0)
 
-            # Lấy từ Supabase user_sense_progress
-            if supabase_client:
-                try:
-                    word_id = item.get("word_id")
-                    if not word_id:
-                        word_res = supabase_client.table("words").select(
-                            "id"
-                        ).eq("word_text", w.lower()).maybe_single().execute()
-                        word_id = word_res.data.get("id") if word_res and word_res.data else None
+        # 4. Sắp xếp theo cấu hình ưu tiên Leitner (Mục 3 spec)
+        p = leitner.priority
+        if p == "translate_desc":
+            words_data.sort(key=lambda x: x.get("translated_count", 0), reverse=True)
+        elif p == "translate_asc":
+            words_data.sort(key=lambda x: x.get("translated_count", 0))
+        elif p == "encounter_desc":
+            words_data.sort(key=lambda x: x.get("encountered_count", 0), reverse=True)
+        elif p == "encounter_asc":
+            words_data.sort(key=lambda x: x.get("encountered_count", 0))
+        elif p == "total_asc":
+            words_data.sort(key=lambda x: x.get("translated_count", 0) + x.get("encountered_count", 0))
+        elif p == "due_first":
+            words_data.sort(key=lambda x: (x.get("next_review") or "") > now_iso)
+        else:  # default total_desc
+            words_data.sort(key=lambda x: x.get("translated_count", 0) + x.get("encountered_count", 0), reverse=True)
 
-                    if word_id:
-                        sense_res = supabase_client.table("senses").select(
-                            "id, meaning_vi, ipa, definition_en, definition_vi, example_en"
-                        ).eq("word_id", word_id).limit(20).execute()
-                        sense_candidates = [
-                            sense for sense in (sense_res.data or [])
-                            if str(sense.get("meaning_vi") or "").strip()
-                        ]
-                    else:
-                        sense_candidates = []
-
-                    if sense_candidates:
-                        sense_data = max(
-                            sense_candidates,
-                            key=lambda sense: bool(str(sense.get("example_en") or "").strip()),
-                        )
-                        sense_pk = sense_data.get("id")
-                        item["word_id"] = word_id
-                        item["sense"] = sense_data
-                        item["sense_id"] = sense_pk
-                        prog_res = supabase_client.table("user_sense_progress").select(
-                            "mastery_score, current_repetition_id, next_review, wrong_count"
-                        ).eq("user_id", user_id).eq("sense_id", sense_pk).maybe_single().execute()
-                        if prog_res and prog_res.data:
-                            p_data = prog_res.data
-                            item["proficiency"] = p_data.get("mastery_score", 0.0)
-                            item["leitner_box"] = p_data.get("current_repetition_id") or 1
-                            item["next_review"] = p_data.get("next_review")
-                except Exception:
-                    pass
-
-        # 4. Lọc theo ngưỡng thông thạo bắt đầu ôn tập
+        # 5. Lọc theo ngưỡng thông thạo: ưu tiên các từ trong ngưỡng trước, nếu chưa đủ total_cards thì bổ sung các từ khác của user
         min_th = leitner.min_threshold
         max_th = leitner.max_threshold
-        filtered_words = [
-            w for w in words_data
+
+        sense_words = [item for item in words_data if item.get("sense")]
+        primary_words = [
+            w for w in sense_words
             if min_th <= w.get("proficiency", 0.0) <= max_th
         ]
 
-        if not filtered_words:
-            filtered_words = words_data
+        if len(primary_words) >= total_cards:
+            selected_words = primary_words[:total_cards]
+        else:
+            primary_words_set = {w["word"].lower() for w in primary_words}
+            secondary_words = [
+                w for w in sense_words
+                if w["word"].lower() not in primary_words_set
+            ]
+            selected_words = (primary_words + secondary_words)[:total_cards]
 
-        # 5. Sắp xếp theo ưu tiên cấu hình (Mục 3 spec)
-        p = leitner.priority
-        if p == "translate_desc":
-            filtered_words.sort(key=lambda x: x.get("translated_count", 0), reverse=True)
-        elif p == "translate_asc":
-            filtered_words.sort(key=lambda x: x.get("translated_count", 0))
-        elif p == "encounter_desc":
-            filtered_words.sort(key=lambda x: x.get("encountered_count", 0), reverse=True)
-        elif p == "encounter_asc":
-            filtered_words.sort(key=lambda x: x.get("encountered_count", 0))
-        elif p == "total_asc":
-            filtered_words.sort(key=lambda x: x.get("translated_count", 0) + x.get("encountered_count", 0))
-        elif p == "due_first":
-            # Ưu tiên các từ tới hạn hoặc quá hạn ôn tập Leitner
-            filtered_words.sort(key=lambda x: (x.get("next_review") or "") > now_iso)
-        else:  # default total_desc
-            filtered_words.sort(key=lambda x: x.get("translated_count", 0) + x.get("encountered_count", 0), reverse=True)
-
-        selected_words = filtered_words[:total_cards]
-
-        # 6. Build choices from actual translations, never from placeholder meanings.
-        sense_items = [item for item in selected_words if item.get("sense")]
-
+        # 6. Build choices & distractors
         available_meanings = list(dict.fromkeys(
             str(entry["sense"].get("meaning_vi") or "").strip()
-            for entry in sense_items
+            for entry in selected_words
+            if entry.get("sense") and str(entry["sense"].get("meaning_vi") or "").strip()
         ))
+
+        # Nếu danh sách distractors ít hơn 6, lấy thêm từ senses hệ thống để trắc nghiệm luôn đủ 4 đáp án
+        if len(available_meanings) < 6 and supabase_client:
+            try:
+                extra_res = supabase_client.table("senses").select("meaning_vi").not_.is_("meaning_vi", "null").limit(50).execute()
+                if extra_res and extra_res.data:
+                    for row in extra_res.data:
+                        m_txt = str(row.get("meaning_vi") or "").strip()
+                        if m_txt and m_txt not in available_meanings:
+                            available_meanings.append(m_txt)
+            except Exception as e:
+                logger.debug(f"Fetch extra distractors error: {e}")
+
         cards: List[FlashcardCard] = []
-        for item in sense_items:
+        for item in selected_words:
             word_str = item["word"]
             s_data = item["sense"]
             meaning = str(s_data.get("meaning_vi") or "").strip()
@@ -407,7 +462,6 @@ class DynamicGenerator:
             def_en = s_data.get("definition_en")
             def_vi = s_data.get("definition_vi")
 
-            # Backend chọn task type phù hợp theo proficiency (spec mục 4)
             selected_task = cls._select_task_type(
                 proficiency=prof,
                 allowed_task_types=allowed_types,
@@ -454,6 +508,24 @@ class DynamicGenerator:
                 question_text=question_txt,
             )
             cards.append(card)
+
+        # 7. Nếu kho từ của user vẫn chưa đủ total_cards: Bổ sung từ kho hệ thống để đảm bảo luôn đủ số lượng thẻ
+        if len(cards) < total_cards and supabase_client:
+            try:
+                existing_words = {c.word.lower() for c in cards}
+                needed = total_cards - len(cards)
+                system_cards = await cls.generate_system_dynamic_cards(
+                    settings=settings,
+                    supabase_client=supabase_client
+                )
+                for sc in system_cards:
+                    if sc.word.lower() not in existing_words:
+                        cards.append(sc)
+                        existing_words.add(sc.word.lower())
+                        if len(cards) >= total_cards:
+                            break
+            except Exception as e:
+                logger.warning(f"Error supplementing system cards: {e}")
 
         return cards
 
