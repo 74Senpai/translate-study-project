@@ -11,6 +11,7 @@ from loguru import logger
 
 from src.core.supabase import get_system_client, get_supabase
 from src.middleware.auth import get_current_user
+from src.translate.services.ipa_service import get_ipa_service
 
 
 router = APIRouter(prefix="/user", tags=["user"])
@@ -28,6 +29,7 @@ class PersonalWordCreateRequest(BaseModel):
     word: str = Field(..., min_length=1, description="Từ tiếng Anh")
     personal_translation: Optional[str] = Field(None, description="Bản dịch / ghi chú cá nhân")
     personal_context: Optional[str] = Field(None, description="Câu ngữ cảnh ví dụ")
+    ipa: Optional[str] = Field(None, description="Phiên âm IPA")
     encountered_count: Optional[int] = Field(1, ge=0)
     translated_count: Optional[int] = Field(1, ge=0)
 
@@ -352,17 +354,21 @@ async def add_personal_word(
 
     # 4. Lưu bản dịch cá nhân (user_sense_notes) nếu có
     sense_id = None
+    ipa_val = payload.ipa or get_ipa_service().get_ipa(clean_w)
     if payload.personal_translation or payload.personal_context:
         # Tìm sense hoặc tạo sense mẫu cho từ này
-        sense_rec = client.table("senses").select("id").eq("word_id", word_id).maybe_single().execute()
+        sense_rec = client.table("senses").select("id, ipa").eq("word_id", word_id).maybe_single().execute()
         if sense_rec and sense_rec.data:
             sense_id = sense_rec.data["id"]
+            if ipa_val and (not sense_rec.data.get("ipa") or not str(sense_rec.data.get("ipa")).strip()):
+                client.table("senses").update({"ipa": ipa_val, "updated_at": now_iso}).eq("id", sense_id).execute()
         else:
             sense_id = f"custom_{word_id[:8]}"
             client.table("senses").insert({
                 "id": sense_id,
                 "word_id": word_id,
                 "meaning_vi": payload.personal_translation or "",
+                "ipa": ipa_val,
                 "created_at": now_iso,
                 "updated_at": now_iso
             }).execute()

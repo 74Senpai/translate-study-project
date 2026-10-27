@@ -192,23 +192,48 @@ export default function TranslateResult({
                           </div>
                         ) : item.meaning ? (
                           <>
-                            <p className="m-0 text-slate-800">
-                              <strong className="text-slate-900">Nghĩa:</strong>{" "}
-                              <span className="font-semibold text-blue-700">{item.meaning}</span>
-                            </p>
+                            <div className="flex flex-col gap-1 pb-1.5 border-b border-slate-100">
+                              <p className="m-0 text-slate-800">
+                                <strong className="text-slate-900">
+                                  Nghĩa:
+                                </strong>{" "}
+                                <span className="font-bold text-blue-700">
+                                  {item.meaning}
+                                </span>
+                              </p>
+                              {item.ipa && (
+                                <p className="m-0 text-slate-800 flex items-center justify-between gap-1">
+                                  <strong className="text-slate-900">
+                                    Phiên âm:
+                                  </strong>
+                                  <span className="font-bold font-mono text-amber-700 bg-amber-50 px-2 py-0.5 rounded-lg border border-amber-200 text-xs">
+                                    {item.ipa}
+                                  </span>
+                                </p>
+                              )}
+                            </div>
                             {item.definition && (
                               <p className="m-0 text-[0.75rem] text-slate-600 leading-snug">
-                                <strong className="text-slate-800">Định nghĩa:</strong> {item.definition}
+                                <strong className="text-slate-800">
+                                  Định nghĩa:
+                                </strong>{" "}
+                                {item.definition}
                               </p>
                             )}
                             {item.example && (
                               <p className="m-0 text-[0.75rem] text-slate-500 italic leading-snug">
-                                <strong className="not-italic text-slate-700">Ví dụ:</strong> &quot;{item.example}&quot;
+                                <strong className="not-italic text-slate-700">
+                                  Ví dụ:
+                                </strong>{" "}
+                                &quot;{item.example}&quot;
                               </p>
                             )}
                             {item.synonyms && item.synonyms.length > 0 && (
                               <p className="m-0 text-[0.7rem] text-slate-500">
-                                <strong className="text-slate-700">Đồng nghĩa:</strong> {item.synonyms.join(", ")}
+                                <strong className="text-slate-700">
+                                  Đồng nghĩa:
+                                </strong>{" "}
+                                {item.synonyms.join(", ")}
                               </p>
                             )}
                           </>
@@ -226,6 +251,7 @@ export default function TranslateResult({
                     <SaveWordButton
                       word={item.text}
                       meaning={item.meaning}
+                      ipa={item.ipa}
                       sentence={item.sentence}
                       tense={item.tense}
                       sentenceType={item.sentence_type}

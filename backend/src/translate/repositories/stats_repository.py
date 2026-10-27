@@ -62,11 +62,13 @@ class StatsRepository:
         entry["last_seen"] = last_seen
 
         # Persist to Supabase only if user is authenticated
-        if user_id and self.supabase_repo:
+        if user_id:
             try:
-                word_rec = self.supabase_repo.get_or_create_word(word_key)
+                repo = self.supabase_repo or SupabaseVocabRepository()
+                word_rec = repo.get_or_create_word(word_key)
                 if word_rec and word_rec.get("id"):
-                    self.supabase_repo.record_user_word(user_id=user_id, word_id=word_rec["id"])
+                    repo.record_user_word(user_id=user_id, word_id=word_rec["id"])
+                    repo.record_user_word_statistic(user_id=user_id, word=word_key, is_translated=is_translated)
             except Exception as e:
                 logger.warning(f"Could not persist user word stat for user {user_id}: {e}")
 

@@ -37,6 +37,7 @@ from src.translate.models.translate_model import TranslateMode
 from src.translate.models.vocab_model import VocabItem, VocabAnalysisResponse
 from src.translate.repositories.vocab_repository import VocabRepository
 from src.translate.services.embedding_service import EmbeddingService
+from src.translate.services.ipa_service import IpaService, get_ipa_service
 
 LOCATION_NER_LABELS = {"GPE", "LOC", "FAC"}
 KEEP_ORIGINAL_NER_LABELS = {
@@ -65,10 +66,12 @@ class VocabService:
         embedding_service: Optional[EmbeddingService] = None,
         spacy_model: str = "en_core_web_sm",
         engine_manager: Optional[TranslateEngineManager] = None,
+        ipa_service: Optional[IpaService] = None,
     ):
         self.repo = repo or VocabRepository()
         self.embedding_service = embedding_service or EmbeddingService(spacy_model=spacy_model)
         self.engine_manager = engine_manager or TranslateEngineManager()
+        self.ipa_service = ipa_service or get_ipa_service()
         self.nlp = None
         try:
             self.nlp = spacy.load(spacy_model)
@@ -215,6 +218,7 @@ class VocabService:
                     is_trusted=True,
                     wsd_method_scores=None,
                     pos="PROPN",
+                    ipa=self.ipa_service.get_ipa(display_word),
                 )
                 vocab_items.append(item)
                 continue
@@ -239,6 +243,7 @@ class VocabService:
                     is_trusted=True,
                     wsd_method_scores=None,
                     pos="PROPN",
+                    ipa=self.ipa_service.get_ipa(display_word),
                 )
                 vocab_items.append(item)
                 meaning_requests.append((item, display_word, "", display_word))
@@ -306,6 +311,7 @@ class VocabService:
                     is_trusted=True,
                     wsd_method_scores=None,
                     pos=pos_tag,
+                    ipa=self.ipa_service.get_ipa(display_word),
                 )
                 vocab_items.append(item)
                 # For translation: use SpaCy lemma (base form) for single words, display_word for phrases
@@ -507,6 +513,7 @@ class VocabService:
                 is_trusted=is_trusted,
                 wsd_method_scores=synset_method_details.get(best_synset_name),
                 pos=pos_tag,
+                ipa=self.ipa_service.get_ipa(display_word),
             )
             vocab_items.append(item)
             # For translation: use SpaCy lemma (base form) for single words, display_word for phrases
@@ -519,6 +526,8 @@ class VocabService:
             translated_sentence=translated_sentence,
         )
         for item in vocab_items:
+            if not item.ipa:
+                item.ipa = self.ipa_service.get_ipa(item.word)
             self.repo.save_vocab_item(item, user_id=user_id)
         return VocabAnalysisResponse(sentence=sentence_text, vocabularies=vocab_items)
 
@@ -1331,6 +1340,7 @@ class VocabService:
             is_trusted=True,
             wsd_method_scores=None,
             pos=pos,
+            ipa=self.ipa_service.get_ipa(word),
         )
 
     def _build_fallback_item(
@@ -1358,6 +1368,7 @@ class VocabService:
             is_trusted=False,
             wsd_method_scores=None,
             pos=pos_tag,
+            ipa=self.ipa_service.get_ipa(word),
         )
 
     def _get_synsets(self, word_input, pos_tag: str = ""):

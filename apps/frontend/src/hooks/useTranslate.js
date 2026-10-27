@@ -201,6 +201,7 @@ export function useTranslate() {
                   example: vItem.simple_example || "",
                   synonyms: vItem.synonyms || [],
                   antonyms: vItem.antonyms || [],
+                  ipa: vItem.ipa || "",
                 };
               }
               return t;

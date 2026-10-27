@@ -195,7 +195,7 @@ class SupabaseVocabRepository:
                     updates["example_en"] = sense.example_en
                 if sense.part_of_speech and not existing.get("part_of_speech"):
                     updates["part_of_speech"] = sense.part_of_speech
-                if sense.ipa and not existing.get("ipa"):
+                if sense.ipa and (not existing.get("ipa") or not str(existing.get("ipa")).strip()):
                     updates["ipa"] = sense.ipa
                 if sense.synonyms and not existing.get("synonyms"):
                     updates["synonyms"] = sense.synonyms
@@ -266,6 +266,62 @@ class SupabaseVocabRepository:
             return res.data[0] if res.data else None
         except Exception as e:
             logger.error(f"Error record_user_word for user {user_id}, word {word_id}: {e}")
+            return None
+
+    def record_user_word_statistic(
+        self,
+        user_id: str,
+        word: str,
+        is_translated: bool = True,
+    ) -> Optional[Dict[str, Any]]:
+        """Upsert thống kê từ vựng của user trong bảng user_word_statistics."""
+        clean_w = word.strip().lower()
+        if not clean_w or not user_id:
+            return None
+        now_iso = datetime.now(timezone.utc).isoformat()
+        enc_inc = 0 if is_translated else 1
+        trans_inc = 1 if is_translated else 0
+        try:
+            stat_rec = (
+                self.client.table("user_word_statistics")
+                .select("id, encountered_count, translated_count")
+                .eq("user_id", user_id)
+                .eq("word", clean_w)
+                .maybe_single()
+                .execute()
+            )
+            if stat_rec and stat_rec.data:
+                s_id = stat_rec.data["id"]
+                new_enc = stat_rec.data.get("encountered_count", 0) + enc_inc
+                new_trans = stat_rec.data.get("translated_count", 0) + trans_inc
+                res_up = (
+                    self.client.table("user_word_statistics")
+                    .update({
+                        "encountered_count": new_enc,
+                        "translated_count": new_trans,
+                        "total_count": new_enc + new_trans,
+                        "last_seen": now_iso,
+                        "updated_at": now_iso,
+                    })
+                    .eq("id", s_id)
+                    .execute()
+                )
+                return res_up.data[0] if res_up.data else stat_rec.data
+            else:
+                payload = {
+                    "user_id": user_id,
+                    "word": clean_w,
+                    "encountered_count": max(1, enc_inc),
+                    "translated_count": max(1, trans_inc),
+                    "total_count": 1,
+                    "last_seen": now_iso,
+                    "created_at": now_iso,
+                    "updated_at": now_iso,
+                }
+                res_ins = self.client.table("user_word_statistics").insert(payload).execute()
+                return res_ins.data[0] if res_ins.data else None
+        except Exception as e:
+            logger.warning(f"Error record_user_word_statistic for '{clean_w}': {e}")
             return None
 
     # ── USER SENSE PROGRESS (Tiến độ học SRS theo từng nghĩa của từ) ─────────
@@ -602,6 +658,7 @@ class SupabaseVocabRepository:
             # 4. Khi User ĐÃ đăng nhập: Lưu vào các bảng ràng buộc user
             if word_id:
                 self.record_user_word(user_id=user_id, word_id=word_id)
+                self.record_user_word_statistic(user_id=user_id, word=clean_word, is_translated=True)
 
             if actual_sense_id:
                 # Cập nhật tiến độ học sense

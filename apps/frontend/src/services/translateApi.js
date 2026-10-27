@@ -24,6 +24,15 @@ export async function* translate(rawText, mode, signal, option = {}) {
     headers["Authorization"] = `Bearer ${accessToken}`;
   }
 
+  let userId = null;
+  try {
+    const rawUser = localStorage.getItem("user");
+    if (rawUser) {
+      const userObj = JSON.parse(rawUser);
+      userId = userObj?.id || userObj?.sub || null;
+    }
+  } catch (_) {}
+
   const parsedMode = typeof mode === "string" ? JSON.parse(mode) : mode;
 
   const response = await fetch(endpoint, {
@@ -34,6 +43,7 @@ export async function* translate(rawText, mode, signal, option = {}) {
       text: rawText,
       source: parsedMode,
       option: option,
+      user_id: userId,
     }),
   });
 

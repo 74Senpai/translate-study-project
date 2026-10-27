@@ -19,6 +19,7 @@ import {
 export default function SaveWordButton({
   word,
   meaning,
+  ipa,
   sentence,
   tense,
   sentenceType,
@@ -61,6 +62,7 @@ export default function SaveWordButton({
       await saveWord({
         word,
         meaning_vi: meaning,
+        ipa: ipa || undefined,
         note: note || undefined,
         sentence_en: sentence || undefined,
         grammar_tense: finalTense || undefined,
@@ -134,12 +136,17 @@ export default function SaveWordButton({
               <div>
                 <label className="flex items-center gap-1.5 text-[0.65rem] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">
                   <Languages className="w-3 h-3" />
-                  Từ vựng
+                  Từ vựng & Phiên âm
                 </label>
-                <div className="bg-slate-50 border border-slate-100 rounded-xl px-4 py-3">
+                <div className="bg-slate-50 border border-slate-100 rounded-xl px-4 py-3 flex items-center justify-between">
                   <p className="text-base font-black text-blue-600 m-0">
                     {word}
                   </p>
+                  {ipa && (
+                    <span className="text-xs font-bold font-mono text-amber-700 bg-amber-50 px-2 py-0.5 rounded-lg border border-amber-200">
+                      {ipa}
+                    </span>
+                  )}
                 </div>
               </div>
 

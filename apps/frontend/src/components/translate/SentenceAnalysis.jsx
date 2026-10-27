@@ -1,5 +1,12 @@
 import { Link } from "react-router-dom";
-import { Loader2, BookOpen, Sparkles, Tag, HelpCircle, Layers } from "lucide-react";
+import {
+  Loader2,
+  BookOpen,
+  Sparkles,
+  Tag,
+  HelpCircle,
+  Layers,
+} from "lucide-react";
 
 const SLUG_MAPPING = {
   // Tenses
@@ -26,8 +33,16 @@ const SLUG_MAPPING = {
  * SentenceAnalysis component displays grammatical analysis & vocabulary breakdown.
  * Shows tense, sentence types, voice, AND extracted vocabulary meanings, definitions, examples.
  */
-export default function SentenceAnalysis({ analysis, vocabularies = [], isVocabLoading = false }) {
-  if ((!analysis || analysis.length === 0) && !isVocabLoading && vocabularies.length === 0) {
+export default function SentenceAnalysis({
+  analysis,
+  vocabularies = [],
+  isVocabLoading = false,
+}) {
+  if (
+    (!analysis || analysis.length === 0) &&
+    !isVocabLoading &&
+    vocabularies.length === 0
+  ) {
     return null;
   }
 
@@ -161,7 +176,8 @@ export default function SentenceAnalysis({ analysis, vocabularies = [], isVocabL
                 Đang phân tích nghĩa ngữ cảnh, định nghĩa và ví dụ...
               </span>
               <span className="text-xs text-slate-400 font-medium">
-                Hệ thống đang chạy thuật toán tra nghĩa cho từng từ vựng trong câu
+                Hệ thống đang chạy thuật toán tra nghĩa cho từng từ vựng trong
+                câu
               </span>
             </div>
           </div>
@@ -176,7 +192,7 @@ export default function SentenceAnalysis({ analysis, vocabularies = [], isVocabL
                 className="bg-white p-5 rounded-3xl border border-slate-100 shadow-md hover:shadow-xl transition-all flex flex-col gap-2.5"
               >
                 {/* Top header: Word name & Tag */}
-                <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                <div className="flex items-center justify-between pb-2 border-b border-slate-100 flex-wrap gap-2">
                   <div className="flex items-center gap-2">
                     <span className="text-base font-extrabold text-slate-900">
                       {vocab.word}
@@ -187,15 +203,48 @@ export default function SentenceAnalysis({ analysis, vocabularies = [], isVocabL
                       </span>
                     )}
                   </div>
-                  {vocab.contextual_meaning ? (
-                    <span className="px-3 py-1 bg-emerald-50 text-emerald-700 rounded-xl text-xs font-black border border-emerald-100">
-                      {vocab.contextual_meaning}
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    {vocab.ipa && (
+                      <span
+                        className="px-2.5 py-1 bg-amber-50 text-amber-700 rounded-xl text-xs font-bold font-mono border border-amber-200 shadow-sm flex items-center gap-1"
+                        title="Phiên âm quốc tế IPA"
+                      >
+                        <span className="text-[0.6rem] font-black text-amber-500 uppercase tracking-tighter font-sans">
+                          IPA
+                        </span>
+                        {vocab.ipa}
+                      </span>
+                    )}
+                    {vocab.contextual_meaning ? (
+                      <span className="px-3 py-1 bg-emerald-50 text-emerald-700 rounded-xl text-xs font-black border border-emerald-100 shadow-sm">
+                        {vocab.contextual_meaning}
+                      </span>
+                    ) : (
+                      <span className="px-2.5 py-0.5 bg-slate-100 text-slate-400 rounded-xl text-[0.7rem] font-bold">
+                        Đang tải nghĩa...
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Meaning & IPA highlighted section */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 p-2.5 bg-slate-50/80 rounded-2xl border border-slate-100">
+                  <div className="flex flex-col">
+                    <span className="text-[0.65rem] font-extrabold text-slate-400 uppercase tracking-wider">
+                      Nghĩa trong câu
                     </span>
-                  ) : (
-                    <span className="px-2.5 py-0.5 bg-slate-100 text-slate-400 rounded-xl text-[0.7rem] font-bold">
-                      Đang tải nghĩa...
+                    <span className="text-sm font-black text-emerald-700 mt-0.5">
+                      {vocab.contextual_meaning || "Đang tải nghĩa..."}
                     </span>
-                  )}
+                  </div>
+                  <div className="flex flex-col">
+                    <span className="text-[0.65rem] font-extrabold text-slate-400 uppercase tracking-wider">
+                      Phiên âm chuẩn (IPA)
+                    </span>
+                    <span className="text-sm font-bold font-mono text-amber-700 mt-0.5">
+                      {vocab.ipa || "—"}
+                    </span>
+                  </div>
                 </div>
 
                 {/* Definition */}

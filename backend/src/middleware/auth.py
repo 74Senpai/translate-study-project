@@ -161,10 +161,29 @@ async def get_current_user(request: Request) -> dict:
 async def get_optional_current_user(request: Request) -> Optional[dict]:
     """
     Phiên bản tuỳ chọn (không bắt buộc auth) — trả về None nếu không có token.
+    Nếu get_current_user thất bại (ví dụ timeout mạng với Supabase Auth),
+    fallback giải mã payload JWT để lấy user_id (sub).
     """
     try:
         return await get_current_user(request)
-    except HTTPException:
+    except (HTTPException, Exception):
+        auth_header = request.headers.get("Authorization")
+        if auth_header and auth_header.startswith("Bearer "):
+            token = auth_header.split(" ", 1)[1].strip()
+            try:
+                from jose import jwt
+                claims = jwt.get_unverified_claims(token)
+                sub = claims.get("sub")
+                if sub:
+                    return {
+                        "sub": sub,
+                        "id": sub,
+                        "email": claims.get("email"),
+                        "roles": ["USER"],
+                        "is_admin": False,
+                    }
+            except Exception as ex:
+                logger.debug(f"Fallback JWT parse failed: {ex}")
         return None
 
 

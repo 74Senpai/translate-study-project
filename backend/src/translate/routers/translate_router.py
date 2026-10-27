@@ -92,8 +92,8 @@ async def translate_simple(
     current_user: dict | None = Depends(get_optional_current_user),
     workflow: TranslateWorkflow = Depends(get_translate_workflow),
 ):
-    if current_user and not data.user_id:
-        data.user_id = current_user.get("sub")
+    if current_user:
+        data.user_id = current_user.get("sub") or current_user.get("id") or data.user_id
 
     async def stream():
         async for item in workflow.simple_translate(data):
@@ -114,8 +114,8 @@ async def translate_stream(
     current_user: dict | None = Depends(get_optional_current_user),
     workflow: TranslateWorkflow = Depends(get_translate_workflow),
 ):
-    if current_user and not data.user_id:
-        data.user_id = current_user.get("sub")
+    if current_user:
+        data.user_id = current_user.get("sub") or current_user.get("id") or data.user_id
 
     async def stream():
         async for item in workflow.translate(data):
@@ -137,8 +137,8 @@ async def translate_json(
     current_user: dict | None = Depends(get_optional_current_user),
     workflow: TranslateWorkflow = Depends(get_translate_workflow),
 ) -> List[TranslateWorkflowResponse]:
-    if current_user and not data.user_id:
-        data.user_id = current_user.get("sub")
+    if current_user:
+        data.user_id = current_user.get("sub") or current_user.get("id") or data.user_id
 
     results: List[TranslateWorkflowResponse] = []
     async for item in workflow.translate(data):
