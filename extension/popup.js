@@ -19,6 +19,7 @@ const STORAGE_KEYS = {
   viewMode: "viewModeState",
   sharedState: "sharedViewState",
   disabledPos: "disabledPosTypes",
+  translationOptions: "translation_options",
 };
 
 const TEXT = {
@@ -75,6 +76,16 @@ document.addEventListener("DOMContentLoaded", () => {
   let disabledPosTypes = new Set();
   let quickTranslationSucceeded = false;
 
+  // Translation feature options
+  const DEFAULT_OPTIONS = {
+    analysis: true,
+    vocab: true,
+    typo: true,
+    quick_translate: true,
+  };
+  let translationOptions = { ...DEFAULT_OPTIONS };
+  let isUserLoggedIn = false;
+
   const toggleSwitch = document.getElementById("toggle-translate");
   const modeViEn = document.getElementById("mode-vi-en");
   const modeEnVi = document.getElementById("mode-en-vi");
@@ -104,6 +115,17 @@ document.addEventListener("DOMContentLoaded", () => {
   const savedWordsBtn = document.getElementById("saved-words-btn");
   const copyBtn = document.getElementById("copy-btn");
   const promoBanner = document.getElementById("promo-banner");
+
+  // Options panel elements
+  const optionsToggleBtn = document.getElementById("options-toggle-btn");
+  const optionsPanel = document.getElementById("options-panel");
+  const optionsCloseBtn = document.getElementById("options-close-btn");
+  const optAnalysis = document.getElementById("opt-analysis");
+  const optVocab = document.getElementById("opt-vocab");
+  const optTypo = document.getElementById("opt-typo");
+  const optQuickTranslate = document.getElementById("opt-quick-translate");
+  const vocabAuthBadge = document.getElementById("vocab-auth-badge");
+  const rowOptVocab = document.getElementById("row-opt-vocab");
 
   let mode = "en-vi";
 
@@ -541,13 +563,51 @@ document.addEventListener("DOMContentLoaded", () => {
     }
     resultSection.classList.add("loading-analysis");
 
-    // REQUEST QUICK
+    const needsFull = translationOptions.vocab !== false || translationOptions.analysis !== false;
+
+    if (!needsFull) {
+      // Chỉ cần dịch đơn giản (không cần vocab/analysis)
+      chrome.runtime.sendMessage(
+        {
+          action: "translate",
+          text,
+          mode: modeSnapshot,
+          quickOnly: true,
+          options: translationOptions,
+        },
+        (response) => {
+          if (revision !== currentRevision) return;
+          if (requestKey !== buildRequestKey(inputText.value, mode)) return;
+
+          loadingLine.classList.remove("show");
+          resultSection.classList.remove("loading-translation");
+          resultSection.classList.remove("loading-analysis");
+          setTimeout(() => {
+            if (!loadingLine.classList.contains("show"))
+              loadingLine.style.display = "none";
+          }, 500);
+
+          if (response?.success && response.data) {
+            lastRequestKey = requestKey;
+            clearError();
+            renderResultIfChanged(response.data);
+          } else {
+            showError(response?.error || TEXT.errorServer);
+          }
+        },
+      );
+      return;
+    }
+
+    // REQUEST QUICK (song song với full để tốc độ hiển thị tốt hơn)
     chrome.runtime.sendMessage(
       {
         action: "translate",
         text,
         mode: modeSnapshot,
         full: false,
+        quickOnly: true,
+        options: { ...translationOptions, analysis: false, vocab: false },
       },
       (response) => {
         if (revision !== currentRevision) return;
@@ -564,13 +624,14 @@ document.addEventListener("DOMContentLoaded", () => {
       },
     );
 
-    // REQUEST FULL (song song)
+    // REQUEST FULL — dùng API thông minh để không bỏ sót từ mới
     chrome.runtime.sendMessage(
       {
         action: "translate",
         text,
         mode: modeSnapshot,
         full: true,
+        options: translationOptions,
       },
       (fullResponse) => {
         if (revision !== currentRevision) return;
@@ -587,20 +648,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
         if (fullResponse?.success && fullResponse.data) {
           renderResultIfChanged(fullResponse.data);
-          // Auto-save history if user is logged in
-          chrome.runtime.sendMessage(
-            { action: "get_auth_state" },
-            (authResp) => {
-              if (authResp?.loggedIn) {
-                saveHistoryToServer(
-                  text,
-                  fullResponse.data.translated_text || "",
-                  modeSnapshot === "vi-en" ? "vi" : "en",
-                  modeSnapshot === "vi-en" ? "en" : "vi",
-                );
-              }
-            },
-          );
         } else {
           showError(fullResponse?.error || TEXT.errorServer);
         }
@@ -788,6 +835,121 @@ document.addEventListener("DOMContentLoaded", () => {
       chrome.storage.local.set({
         [STORAGE_KEYS.enabled]: toggleSwitch.checked,
       });
+      // Also sync quick_translate option
+      updateOptionCheckbox("quick_translate", toggleSwitch.checked);
+    });
+  }
+
+  // ── Translation Options Panel ──────────────────────────────────────────────
+
+  function syncOptionUi() {
+    if (optAnalysis) optAnalysis.checked = translationOptions.analysis !== false;
+    if (optVocab) {
+      if (!isUserLoggedIn) {
+        optVocab.checked = false;
+        optVocab.disabled = true;
+      } else {
+        optVocab.disabled = false;
+        optVocab.checked = translationOptions.vocab !== false;
+      }
+    }
+    if (optTypo) optTypo.checked = translationOptions.typo !== false;
+    if (optQuickTranslate) optQuickTranslate.checked = translationOptions.quick_translate !== false;
+
+    // Reflect quick_translate state on the main bôi đen toggle
+    if (toggleSwitch && optQuickTranslate) {
+      toggleSwitch.checked = translationOptions.quick_translate !== false;
+    }
+
+    if (vocabAuthBadge) {
+      if (isUserLoggedIn) {
+        vocabAuthBadge.textContent = "✓ Đã kết nối";
+        vocabAuthBadge.classList.add("logged-in");
+        if (rowOptVocab) rowOptVocab.classList.remove("disabled-auth");
+      } else {
+        vocabAuthBadge.textContent = "🔒 Cần đăng nhập";
+        vocabAuthBadge.classList.remove("logged-in");
+        if (rowOptVocab) rowOptVocab.classList.add("disabled-auth");
+      }
+    }
+
+    // Show AI badge on toggle button when vocab or analysis is on
+    const needsFull = (isUserLoggedIn && translationOptions.vocab !== false) || translationOptions.analysis !== false;
+    if (optionsToggleBtn) {
+      optionsToggleBtn.title = needsFull
+        ? "Tùy chọn dịch — đang dùng API thông minh (vocab + phân tích bật)"
+        : "Tùy chọn dịch — đang dùng API nhanh";
+    }
+  }
+
+  function updateOptionCheckbox(key, value) {
+    if (key === "vocab" && !isUserLoggedIn && value) {
+      showError("Tính năng lưu từ vựng cá nhân yêu cầu đăng nhập tài khoản!");
+      if (optVocab) optVocab.checked = false;
+      return;
+    }
+    translationOptions[key] = value;
+    chrome.storage.local.set({ [STORAGE_KEYS.translationOptions]: translationOptions });
+    chrome.runtime.sendMessage({
+      action: "set_translation_options",
+      options: translationOptions,
+    });
+    syncOptionUi();
+  }
+
+  // Load saved options from storage
+  chrome.storage.local.get([STORAGE_KEYS.translationOptions], (result) => {
+    if (result[STORAGE_KEYS.translationOptions]) {
+      translationOptions = { ...DEFAULT_OPTIONS, ...result[STORAGE_KEYS.translationOptions] };
+    }
+    syncOptionUi();
+  });
+
+  // Toggle panel open/close
+  if (optionsToggleBtn && optionsPanel) {
+    optionsToggleBtn.addEventListener("click", () => {
+      const isOpen = optionsPanel.style.display !== "none";
+      optionsPanel.style.display = isOpen ? "none" : "block";
+      optionsToggleBtn.classList.toggle("active", !isOpen);
+    });
+  }
+
+  if (optionsCloseBtn && optionsPanel) {
+    optionsCloseBtn.addEventListener("click", () => {
+      optionsPanel.style.display = "none";
+      if (optionsToggleBtn) optionsToggleBtn.classList.remove("active");
+    });
+  }
+
+  // Wire each option checkbox
+  if (optAnalysis) {
+    optAnalysis.addEventListener("change", () => {
+      updateOptionCheckbox("analysis", optAnalysis.checked);
+    });
+  }
+  if (optVocab) {
+    optVocab.addEventListener("change", () => {
+      updateOptionCheckbox("vocab", optVocab.checked);
+    });
+  }
+  if (vocabAuthBadge) {
+    vocabAuthBadge.addEventListener("click", () => {
+      if (!isUserLoggedIn && loginBtn) {
+        loginBtn.click();
+      }
+    });
+  }
+  if (optTypo) {
+    optTypo.addEventListener("change", () => {
+      updateOptionCheckbox("typo", optTypo.checked);
+    });
+  }
+  if (optQuickTranslate) {
+    optQuickTranslate.addEventListener("change", () => {
+      updateOptionCheckbox("quick_translate", optQuickTranslate.checked);
+      // Mirror to the main isEnabled toggle in content scripts via storage
+      chrome.storage.local.set({ [STORAGE_KEYS.enabled]: optQuickTranslate.checked });
+      if (toggleSwitch) toggleSwitch.checked = optQuickTranslate.checked;
     });
   }
 
@@ -871,6 +1033,9 @@ document.addEventListener("DOMContentLoaded", () => {
       if (promoBanner) promoBanner.style.display = "block";
     }
     if (userDropdown) userDropdown.classList.remove("visible");
+
+    isUserLoggedIn = !!loggedIn;
+    syncOptionUi();
   }
 
   // Initial auth check
@@ -913,34 +1078,6 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  function saveHistoryToServer(
-    sourceText,
-    translatedText,
-    sourceLang,
-    targetLang,
-  ) {
-    chrome.storage.local.get(["access_token"], async (result) => {
-      const token = result.access_token;
-      if (!token) return;
-      try {
-        await fetch(`${CONFIG.API_BASE_URL}/user/history`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            source_text: sourceText,
-            translated_text: translatedText,
-            source_lang: sourceLang,
-            target_lang: targetLang,
-          }),
-        });
-      } catch {
-        /* silent */
-      }
-    });
-  }
 
   // ── User menu logic ─────────────────────────────────────────────────────────
 
@@ -1235,6 +1372,7 @@ document.addEventListener("DOMContentLoaded", () => {
       STORAGE_KEYS.viewMode,
       STORAGE_KEYS.sharedState,
       STORAGE_KEYS.disabledPos,
+      STORAGE_KEYS.translationOptions,
     ],
     (result) => {
       if (result[STORAGE_KEYS.zoom]) {

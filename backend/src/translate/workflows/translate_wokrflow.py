@@ -96,6 +96,11 @@ class TranslateWorkflow:
         self._event_count += 1
 
     async def _process_vi_en_flow(self, req: TranslateRequest, sentences):
+        options = req.option or {}
+        enable_analysis = options.get("analysis", True)
+        enable_vocab = options.get("vocab", True)
+        enable_stats = options.get("stats", True)
+
         curr_engine = self.translator.engine_manager.get_current_engine()
         engine_name = curr_engine.name_engine if curr_engine else "default"
 
@@ -112,40 +117,49 @@ class TranslateWorkflow:
         english_sentences = _input.split_text_to_sentences(translated_text)
 
         # 3a. Update statistics for translated English words (marked as is_translated=True)
-        self._add_event(
-            self.stats.update_statistics(
-                text=translated_text,
-                source_engine=engine_name,
-                is_translated=True,
-                user_id=req.user_id,
-            ),
-            type_resp=TypeResponse.STATS
-        )
-
-        # 3b. Run sentence structure, POS, voice, tense, form analysis on translated English text
-        self._add_event(
-            self.analysis.analysis(lang="en", sentences=english_sentences),
-            type_resp=TypeResponse.ANALYSIS
-        )
-
-        # 3c. Extract and save new vocabulary from translated English text in context
-        for i, eng_s in enumerate(english_sentences):
-            vi_context = sentences[i].sentence_text if i < len(sentences) else req.text
+        if enable_stats:
             self._add_event(
-                self.vocab.extract_and_save_vocab(
-                    sentence_text=eng_s.sentence_text,
-                    translated_sentence=vi_context,
+                self.stats.update_statistics(
+                    text=translated_text,
+                    source_engine=engine_name,
                     is_translated=True,
-                    source_lang="vi",
                     user_id=req.user_id,
                 ),
-                type_resp=TypeResponse.VOCAB
+                type_resp=TypeResponse.STATS
             )
+
+        # 3b. Run sentence structure, POS, voice, tense, form analysis on translated English text
+        if enable_analysis:
+            self._add_event(
+                self.analysis.analysis(lang="en", sentences=english_sentences),
+                type_resp=TypeResponse.ANALYSIS
+            )
+
+        # 3c. Extract and save new vocabulary from translated English text in context
+        if enable_vocab:
+            for i, eng_s in enumerate(english_sentences):
+                vi_context = sentences[i].sentence_text if i < len(sentences) else req.text
+                self._add_event(
+                    self.vocab.extract_and_save_vocab(
+                        sentence_text=eng_s.sentence_text,
+                        translated_sentence=vi_context,
+                        is_translated=True,
+                        source_lang="vi",
+                        user_id=req.user_id,
+                    ),
+                    type_resp=TypeResponse.VOCAB
+                )
 
     async def _translate_core(self, req: TranslateRequest):
         self._event_count = 0
         self._queue = asyncio.Queue()
         finished = 0
+
+        options = req.option or {}
+        enable_analysis = options.get("analysis", True)
+        enable_vocab = options.get("vocab", True)
+        enable_typo = options.get("typo", True)
+        enable_stats = options.get("stats", True)
 
         source_lang = req.source.source_lang
         target_lang = req.source.target_lang
@@ -153,7 +167,7 @@ class TranslateWorkflow:
         # 2. Spell / Typo Check
         sentences = _input.split_text_to_sentences(req.text)
 
-        if source_lang == "en" and self.typo.is_support(source_lang):
+        if enable_typo and source_lang == "en" and self.typo.is_support(source_lang):
             # Run typo check stream for English
             self._add_event(
                 self.typo.sentence_spell_check(sentences=sentences, lang=source_lang),
@@ -164,15 +178,16 @@ class TranslateWorkflow:
         if source_lang == "en" and target_lang == "vi":
             curr_engine = self.translator.engine_manager.get_current_engine()
             engine_name = curr_engine.name_engine if curr_engine else "default"
-            self._add_event(
-                self.stats.update_statistics(
-                    text=req.text,
-                    source_engine=engine_name,
-                    is_translated=False,
-                    user_id=req.user_id,
-                ),
-                type_resp=TypeResponse.STATS
-            )
+            if enable_stats:
+                self._add_event(
+                    self.stats.update_statistics(
+                        text=req.text,
+                        source_engine=engine_name,
+                        is_translated=False,
+                        user_id=req.user_id,
+                    ),
+                    type_resp=TypeResponse.STATS
+                )
 
             # Task 4b: Language Translation
             chunks = _input.get_inputs(text=req.text, service=self.translator.__class__.__name__)
@@ -182,21 +197,23 @@ class TranslateWorkflow:
             )
 
             # Task 4c: Sentence Structure, POS, Form & Tense Analysis
-            self._add_event(
-                self.analysis.analysis(lang=source_lang, sentences=sentences),
-                type_resp=TypeResponse.ANALYSIS
-            )
+            if enable_analysis:
+                self._add_event(
+                    self.analysis.analysis(lang=source_lang, sentences=sentences),
+                    type_resp=TypeResponse.ANALYSIS
+                )
 
             # Task 4d: Vocabulary & Semantics Extraction in Context
-            for s in sentences:
-                self._add_event(
-                    self.vocab.extract_and_save_vocab(
-                        sentence_text=s.sentence_text,
-                        is_translated=False,
-                        user_id=req.user_id,
-                    ),
-                    type_resp=TypeResponse.VOCAB
-                )
+            if enable_vocab:
+                for s in sentences:
+                    self._add_event(
+                        self.vocab.extract_and_save_vocab(
+                            sentence_text=s.sentence_text,
+                            is_translated=False,
+                            user_id=req.user_id,
+                        ),
+                        type_resp=TypeResponse.VOCAB
+                    )
 
         # 4. VI -> EN Flow (Vietnamese -> English translation then English analysis & stats & vocab saving)
         elif source_lang == "vi" and target_lang == "en":
@@ -209,7 +226,7 @@ class TranslateWorkflow:
                 self.translator.translate(source=req.source, chunks=chunks),
                 type_resp=TypeResponse.TRANSLATE
             )
-            if self.analysis.is_availabel():
+            if enable_analysis and self.analysis.is_availabel():
                 self._add_event(
                     self.analysis.analysis(lang=source_lang, sentences=sentences),
                     type_resp=TypeResponse.ANALYSIS

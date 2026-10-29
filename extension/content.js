@@ -168,6 +168,14 @@ function checkContext() {
   }
 }
 
+let contentTranslationOptions = {
+  analysis: true,
+  vocab: true,
+  typo: true,
+  quick_translate: true,
+  save_history: true,
+};
+
 // Lấy trạng thái cài đặt từ storage ngay khi load trang
 try {
   chrome.storage.local.get(
@@ -177,12 +185,22 @@ try {
       "isPinnedActive",
       "extension_settings",
       "access_token",
+      "translation_options",
     ],
     function (result) {
       try {
         if (!checkContext()) return;
+        if (result.translation_options) {
+          contentTranslationOptions = {
+            ...contentTranslationOptions,
+            ...result.translation_options,
+          };
+        }
         if (result.isEnabled !== undefined) {
           isEnabled = result.isEnabled;
+        }
+        if (contentTranslationOptions.quick_translate === false) {
+          isEnabled = false;
         }
         if (result.extensionMode !== undefined) {
           currentMode = result.extensionMode;
@@ -750,6 +768,23 @@ try {
         if (changes.isPinnedActive !== undefined) {
           isPinnedActive = changes.isPinnedActive.newValue;
         }
+        if (changes.translation_options) {
+          contentTranslationOptions = {
+            ...contentTranslationOptions,
+            ...changes.translation_options.newValue,
+          };
+          // Nếu quick_translate bị tắt, vô hiệu hóa dịch nhanh
+          if (contentTranslationOptions.quick_translate === false && isEnabled) {
+            isEnabled = false;
+            removeTooltip();
+            lastSelectedText = "";
+          } else if (contentTranslationOptions.quick_translate === true && !isEnabled) {
+            // Lấy lại isEnabled từ storage chính
+            chrome.storage.local.get("isEnabled", (r) => {
+              isEnabled = r.isEnabled !== false;
+            });
+          }
+        }
         if (changes.extension_settings) {
           // Chỉ áp dụng nếu user đang đăng nhập
           chrome.storage.local.get("access_token", (r) => {
@@ -1128,7 +1163,9 @@ function shouldBlockSelectionByMode(text, mode, detectedLang, isReliable) {
 
   return asciiOnly && (looksLikeEnglishByWords || looksLikeEnglishSingleWord);
 }
-// Hàm gọi API dịch thuật thông qua background script
+let currentStreamPort = null;
+
+// Hàm gọi API dịch thuật kiểu STREAM thông qua background script
 function translateText(text, x, y) {
   showTooltip("Đang dịch...", x, y);
   const requestId = ++tooltipRequestId;
@@ -1142,81 +1179,126 @@ function translateText(text, x, y) {
     return;
   }
 
-  try {
-    chrome.runtime.sendMessage(
-      { action: "translate", text: text, mode: currentMode },
-      (response) => {
+  // Hủy kết nối stream cũ nếu có
+  if (currentStreamPort) {
+    try {
+      currentStreamPort.disconnect();
+    } catch (_) {}
+    currentStreamPort = null;
+  }
+
+  function renderStreamChunk(accumulatedText) {
+    if (!tooltip || requestId !== tooltipRequestId) return;
+    let textSpan = tooltip.querySelector(".tooltip-stream-text");
+    if (!textSpan) {
+      tooltip.innerHTML = "";
+      textSpan = document.createElement("span");
+      textSpan.className = "tooltip-stream-text";
+      tooltip.appendChild(textSpan);
+    }
+    textSpan.textContent = accumulatedText;
+  }
+
+  function renderFinalResult(data, finalTranslatedText) {
+    if (!tooltip || requestId !== tooltipRequestId) return;
+    tooltip.innerHTML = "";
+
+    const textSpan = document.createElement("span");
+    textSpan.className = "tooltip-stream-text";
+    textSpan.textContent = finalTranslatedText;
+    tooltip.appendChild(textSpan);
+
+    const aiBtn = document.createElement("button");
+    aiBtn.innerHTML = "?";
+    aiBtn.title = "Xem phân tích chi tiết & từ vựng";
+    aiBtn.style.cssText =
+      "margin-left: 8px; background: var(--primary-color, #2563eb); color: white; border: none; border-radius: 50%; width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; cursor: pointer; font-weight: 800; box-shadow: 0 2px 4px rgba(37,99,235,0.2); transition: all 0.2s; vertical-align: middle; line-height: 1;";
+
+    aiBtn.onmouseover = () => (aiBtn.style.transform = "translateY(-1px)");
+    aiBtn.onmouseout = () => (aiBtn.style.transform = "translateY(0)");
+
+    aiBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (checkContext()) {
         try {
-          if (!checkContext()) return;
-          if (requestId !== tooltipRequestId) return;
-          if (chrome.runtime.lastError) {
-            console.error("Lỗi kết nối background:", chrome.runtime.lastError);
-            return;
-          }
-
-          if (response && response.success) {
-            const translatedText = response.translatedText;
-            if (tooltip) {
-              tooltip.innerHTML = "";
-
-              const textSpan = document.createElement("span");
-              textSpan.textContent = translatedText;
-
-              const aiBtn = document.createElement("button");
-              aiBtn.innerHTML = "?";
-              aiBtn.title = "Xem phân tích chi tiết";
-              aiBtn.style.cssText =
-                "margin-left: 8px; background: var(--primary-color, #2563eb); color: white; border: none; border-radius: 50%; width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; cursor: pointer; font-weight: 800; box-shadow: 0 2px 4px rgba(37,99,235,0.2); transition: all 0.2s; vertical-align: middle; line-height: 1;";
-
-              aiBtn.onmouseover = () =>
-                (aiBtn.style.transform = "translateY(-1px)");
-              aiBtn.onmouseout = () =>
-                (aiBtn.style.transform = "translateY(0)");
-
-              aiBtn.addEventListener("click", (e) => {
-                e.stopPropagation();
+          chrome.storage.local.set(
+            { pendingData: data },
+            () => {
+              try {
                 if (checkContext()) {
-                  try {
-                    chrome.storage.local.set(
-                      { pendingData: response.data },
-                      () => {
-                        try {
-                          if (checkContext()) {
-                            chrome.runtime.sendMessage({
-                              action: "open_popup",
-                            });
-                          }
-                        } catch (err) {}
-                        lastSelectedText = "";
-                        removeTooltip();
-                      },
-                    );
-                  } catch (err) {}
+                  chrome.runtime.sendMessage({
+                    action: "open_popup",
+                  });
                 }
-              });
+              } catch (err) {}
+              lastSelectedText = "";
+              removeTooltip();
+            },
+          );
+        } catch (err) {}
+      }
+    });
 
-              tooltip.appendChild(textSpan);
-              tooltip.appendChild(aiBtn);
-            }
+    tooltip.appendChild(aiBtn);
+  }
+
+  try {
+    const port = chrome.runtime.connect({ name: "translate_stream" });
+    currentStreamPort = port;
+
+    port.onMessage.addListener((msg) => {
+      try {
+        if (!checkContext() || msg.requestId !== requestId) return;
+
+        if (msg.type === "chunk") {
+          renderStreamChunk(msg.accumulated);
+        } else if (msg.type === "done") {
+          renderFinalResult(msg.data, msg.translatedText);
+          try {
+            port.disconnect();
+          } catch (_) {}
+          if (currentStreamPort === port) currentStreamPort = null;
+        } else if (msg.type === "error") {
+          console.error("Lỗi stream dịch:", msg.error);
+          if (tooltip) tooltip.textContent = "Lỗi: Không thể dịch!";
+          try {
+            port.disconnect();
+          } catch (_) {}
+          if (currentStreamPort === port) currentStreamPort = null;
+        }
+      } catch (err) {
+        console.warn("DeepTranslate: Stream message error:", err);
+      }
+    });
+
+    port.onDisconnect.addListener(() => {
+      if (currentStreamPort === port) currentStreamPort = null;
+    });
+
+    port.postMessage({
+      action: "translate_stream",
+      text: text,
+      mode: currentMode,
+      options: contentTranslationOptions,
+      requestId: requestId,
+    });
+  } catch (error) {
+    // Fallback: sendMessage nếu port connect không thành công
+    try {
+      chrome.runtime.sendMessage(
+        { action: "translate", text: text, mode: currentMode, options: contentTranslationOptions },
+        (response) => {
+          if (!checkContext() || requestId !== tooltipRequestId) return;
+          if (response && response.success) {
+            renderFinalResult(response.data, response.translatedText);
           } else {
-            if (response && response.aborted) {
-              return;
-            }
-
-            const errorMessage =
-              response && response.error
-                ? response.error
-                : "Unknown translation error";
-            console.error("Lỗi dịch:", errorMessage);
             if (tooltip) tooltip.textContent = "Lỗi: Không thể dịch!";
           }
-        } catch (err) {
-          console.warn("DeepTranslate: Translate callback error:", err);
-        }
-      },
-    );
-  } catch (error) {
-    console.warn("DeepTranslate: Request blocked by invalid context.");
+        },
+      );
+    } catch (_) {
+      console.warn("DeepTranslate: Request blocked by invalid context.");
+    }
   }
 }
 

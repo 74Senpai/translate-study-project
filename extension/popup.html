@@ -74,11 +74,89 @@
                 </div>
             </div>
             <div class="settings-group">
-                <span class="label">Dịch nhanh:</span>
-                <label class="switch">
-                    <input type="checkbox" id="toggle-translate" checked>
-                    <span class="slider"></span>
-                </label>
+                <button id="options-toggle-btn" class="options-toggle-btn" title="Tùy chọn dịch & học tập">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="3" />
+                        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+                    </svg>
+                    <span>Tùy chọn</span>
+                </button>
+                <div class="quick-switch-wrapper" title="Bật/tắt dịch nhanh khi bôi đen">
+                    <span class="label">Bôi đen:</span>
+                    <label class="switch">
+                        <input type="checkbox" id="toggle-translate" checked>
+                        <span class="slider"></span>
+                    </label>
+                </div>
+            </div>
+        </div>
+
+        <!-- TRANSLATION OPTIONS PANEL -->
+        <div id="options-panel" class="options-panel" style="display: none;">
+            <div class="options-panel-header">
+                <div class="options-title-group">
+                    <svg class="options-icon" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="3"></circle>
+                        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                    </svg>
+                    <span class="options-title">TÙY CHỌN TÍNH NĂNG DỊCH</span>
+                </div>
+                <button id="options-close-btn" class="icon-btn" title="Đóng tùy chọn">✕</button>
+            </div>
+            <div class="options-body">
+                <div class="option-row">
+                    <div class="option-meta">
+                        <div class="option-name">
+                            <span>🔍 Phân tích ngữ pháp (Analysis)</span>
+                            <span class="opt-badge opt-badge-ai">AI NLP</span>
+                        </div>
+                        <div class="option-desc">Phân tích từ loại (Noun, Verb,...), cấu trúc câu</div>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" id="opt-analysis" checked>
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <div class="option-row" id="row-opt-vocab">
+                    <div class="option-meta">
+                        <div class="option-name">
+                            <span>📚 Thu thập từ mới (Vocab)</span>
+                            <span class="opt-badge opt-badge-auth" id="vocab-auth-badge">🔒 Cần đăng nhập</span>
+                        </div>
+                        <div class="option-desc">Trích xuất & lưu từ vựng vào kho cá nhân (yêu cầu đăng nhập)</div>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" id="opt-vocab" checked>
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <div class="option-row">
+                    <div class="option-meta">
+                        <div class="option-name">
+                            <span>✍️ Sửa lỗi chính tả (Typo check)</span>
+                        </div>
+                        <div class="option-desc">Phát hiện và gợi ý sửa lỗi gõ sai từ tiếng Anh</div>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" id="opt-typo" checked>
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <div class="option-row">
+                    <div class="option-meta">
+                        <div class="option-name">
+                            <span>🖱️ Dịch nhanh khi bôi đen</span>
+                        </div>
+                        <div class="option-desc">Hiện tooltip dịch tức thì khi bôi đen văn bản trên web</div>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" id="opt-quick-translate" checked>
+                        <span class="slider"></span>
+                    </label>
+                </div>
+            </div>
+            <div class="options-footer">
+                <span class="options-tip">💡 Khi bật "Thu thập từ mới" hoặc "Phân tích", extension tự động gọi API thông minh để không bỏ sót từ vựng.</span>
             </div>
         </div>
 

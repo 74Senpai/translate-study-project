@@ -33,10 +33,18 @@ export default function SettingsPage() {
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncStatus, setSyncStatus] = useState(null);
   const [activeTab, setActiveTab] = useState("tts"); // tts | extension
-  
+
   // Extension Settings State
   const [extSettings, setExtSettings] = useState({
-    translation: { enabled_all: true, allowed_urls: [] },
+    translation: {
+      enabled_all: true,
+      allowed_urls: [],
+      analysis: true,
+      vocab: true,
+      typo: true,
+      quick_translate: true,
+      save_history: true,
+    },
     history: { collect_all: true },
     flashcard_popup: {
       enabled: false,
@@ -47,14 +55,12 @@ export default function SettingsPage() {
       timeout: 15,
       daily_frequency: 5,
       entertainment_urls: [
-        {url: "youtube.com", enabled: true}, 
-        {url: "facebook.com", enabled: true}, 
-        {url: "tiktok.com", enabled: true}
+        { url: "youtube.com", enabled: true },
+        { url: "facebook.com", enabled: true },
+        { url: "tiktok.com", enabled: true },
       ],
-    }
+    },
   });
-  const [loadingExt, setLoadingExt] = useState(false);
-  const [savingExt, setSavingExt] = useState(false);
   const [newUrl, setNewUrl] = useState("");
   const [newEntUrl, setNewEntUrl] = useState("");
 
@@ -68,66 +74,83 @@ export default function SettingsPage() {
     loadVoices();
     window.speechSynthesis.onvoiceschanged = loadVoices;
 
-    // Fetch Extension Settings if authenticated
-    if (isAuthenticated) {
-      fetchExtensionSettings();
-    }
-  }, [isAuthenticated]);
-
-  const fetchExtensionSettings = async () => {
-    setLoadingExt(true);
+    // Load extension settings from localStorage
     try {
-      const { data } = await axiosInstance.get("/user/extension-settings");
-      setExtSettings(data);
-    } catch (err) {
-      console.error("Failed to fetch extension settings", err);
-    } finally {
-      setLoadingExt(false);
-    }
-  };
+      const saved = localStorage.getItem("extension_settings");
+      if (saved) {
+        setExtSettings((prev) => ({ ...prev, ...JSON.parse(saved) }));
+      }
+    } catch (_) {}
+  }, []);
 
-  const handleUpdateExtSettings = async (updates) => {
+  const handleUpdateExtSettings = (updates) => {
     const newData = { ...extSettings, ...updates };
     setExtSettings(newData);
-    setSavingExt(true);
     try {
-      await axiosInstance.patch("/user/extension-settings", newData);
-    } catch (err) {
-      console.error("Failed to update extension settings", err);
-    } finally {
-      setSavingExt(false);
-    }
+      localStorage.setItem("extension_settings", JSON.stringify(newData));
+    } catch (_) {}
   };
 
   const addUrl = () => {
-    if (!newUrl || extSettings.translation.allowed_urls.includes(newUrl)) return;
+    if (!newUrl || extSettings.translation.allowed_urls.includes(newUrl))
+      return;
     const urls = [...extSettings.translation.allowed_urls, newUrl];
-    handleUpdateExtSettings({ translation: { ...extSettings.translation, allowed_urls: urls } });
+    handleUpdateExtSettings({
+      translation: { ...extSettings.translation, allowed_urls: urls },
+    });
     setNewUrl("");
   };
 
   const removeUrl = (url) => {
-    const urls = extSettings.translation.allowed_urls.filter(u => u !== url);
-    handleUpdateExtSettings({ translation: { ...extSettings.translation, allowed_urls: urls } });
+    const urls = extSettings.translation.allowed_urls.filter((u) => u !== url);
+    handleUpdateExtSettings({
+      translation: { ...extSettings.translation, allowed_urls: urls },
+    });
   };
 
   const addEntUrl = () => {
-    if (!newEntUrl || extSettings.flashcard_popup.entertainment_urls.some(e => e.url === newEntUrl)) return;
-    const urls = [...extSettings.flashcard_popup.entertainment_urls, { url: newEntUrl, enabled: true }];
-    handleUpdateExtSettings({ flashcard_popup: { ...extSettings.flashcard_popup, entertainment_urls: urls } });
+    if (
+      !newEntUrl ||
+      extSettings.flashcard_popup.entertainment_urls.some(
+        (e) => e.url === newEntUrl,
+      )
+    )
+      return;
+    const urls = [
+      ...extSettings.flashcard_popup.entertainment_urls,
+      { url: newEntUrl, enabled: true },
+    ];
+    handleUpdateExtSettings({
+      flashcard_popup: {
+        ...extSettings.flashcard_popup,
+        entertainment_urls: urls,
+      },
+    });
     setNewEntUrl("");
   };
 
   const toggleEntUrl = (url) => {
-    const urls = extSettings.flashcard_popup.entertainment_urls.map(e => 
-      e.url === url ? { ...e, enabled: !e.enabled } : e
+    const urls = extSettings.flashcard_popup.entertainment_urls.map((e) =>
+      e.url === url ? { ...e, enabled: !e.enabled } : e,
     );
-    handleUpdateExtSettings({ flashcard_popup: { ...extSettings.flashcard_popup, entertainment_urls: urls } });
+    handleUpdateExtSettings({
+      flashcard_popup: {
+        ...extSettings.flashcard_popup,
+        entertainment_urls: urls,
+      },
+    });
   };
 
   const removeEntUrl = (url) => {
-    const urls = extSettings.flashcard_popup.entertainment_urls.filter(e => e.url !== url);
-    handleUpdateExtSettings({ flashcard_popup: { ...extSettings.flashcard_popup, entertainment_urls: urls } });
+    const urls = extSettings.flashcard_popup.entertainment_urls.filter(
+      (e) => e.url !== url,
+    );
+    handleUpdateExtSettings({
+      flashcard_popup: {
+        ...extSettings.flashcard_popup,
+        entertainment_urls: urls,
+      },
+    });
   };
 
   const handleTestVoice = () => {
@@ -180,16 +203,16 @@ export default function SettingsPage() {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
           {/* Menu bên trái */}
           <div className="md:col-span-1 space-y-3">
-            <button 
+            <button
               onClick={() => setActiveTab("tts")}
-              className={`w-full flex items-center gap-3 px-6 py-4 border-2 transition-all rounded-2xl shadow-sm font-extrabold ${activeTab === 'tts' ? 'bg-white border-indigo-500 text-indigo-600' : 'bg-slate-50 border-transparent text-slate-500 hover:bg-white hover:border-slate-200'}`}
+              className={`w-full flex items-center gap-3 px-6 py-4 border-2 transition-all rounded-2xl shadow-sm font-extrabold ${activeTab === "tts" ? "bg-white border-indigo-500 text-indigo-600" : "bg-slate-50 border-transparent text-slate-500 hover:bg-white hover:border-slate-200"}`}
             >
               <Volume2 className="w-5 h-5" />
               Giọng nói (TTS)
             </button>
-            <button 
+            <button
               onClick={() => setActiveTab("extension")}
-              className={`w-full flex items-center gap-3 px-6 py-4 border-2 transition-all rounded-2xl shadow-sm font-extrabold ${activeTab === 'extension' ? 'bg-white border-indigo-500 text-indigo-600' : 'bg-slate-50 border-transparent text-slate-500 hover:bg-white hover:border-slate-200'}`}
+              className={`w-full flex items-center gap-3 px-6 py-4 border-2 transition-all rounded-2xl shadow-sm font-extrabold ${activeTab === "extension" ? "bg-white border-indigo-500 text-indigo-600" : "bg-slate-50 border-transparent text-slate-500 hover:bg-white hover:border-slate-200"}`}
             >
               <Monitor className="w-5 h-5" />
               Cấu hình Extension
@@ -266,8 +289,8 @@ export default function SettingsPage() {
                       ))}
                     </select>
                     <p className="mt-2 text-[10px] text-slate-400 font-medium px-4">
-                      * Lưu ý: Danh sách giọng nói phụ thuộc vào thiết bị và trình
-                      duyệt của bạn.
+                      * Lưu ý: Danh sách giọng nói phụ thuộc vào thiết bị và
+                      trình duyệt của bạn.
                     </p>
                   </div>
 
@@ -341,42 +364,61 @@ export default function SettingsPage() {
                       <Zap className="w-6 h-6" />
                     </div>
                     <div>
-                      <h2 className="text-xl font-black text-slate-800">Dịch thuật trực tiếp</h2>
-                      <p className="text-xs text-slate-400 font-bold uppercase tracking-widest">Translation behavior</p>
+                      <h2 className="text-xl font-black text-slate-800">
+                        Dịch thuật trực tiếp
+                      </h2>
+                      <p className="text-xs text-slate-400 font-bold uppercase tracking-widest">
+                        Translation behavior
+                      </p>
                     </div>
                   </div>
 
                   <div className="space-y-6">
                     <label className="flex items-center justify-between p-6 bg-slate-50 rounded-3xl cursor-pointer group hover:bg-slate-100 transition-all border border-transparent hover:border-slate-200">
                       <div className="flex items-center gap-4">
-                        <div className={`w-6 h-6 rounded-md border-2 flex items-center justify-center transition-all ${extSettings.translation.enabled_all ? 'bg-indigo-600 border-indigo-600' : 'border-slate-300'}`}>
-                          {extSettings.translation.enabled_all && <Check className="w-4 h-4 text-white" />}
+                        <div
+                          className={`w-6 h-6 rounded-md border-2 flex items-center justify-center transition-all ${extSettings.translation.enabled_all ? "bg-indigo-600 border-indigo-600" : "border-slate-300"}`}
+                        >
+                          {extSettings.translation.enabled_all && (
+                            <Check className="w-4 h-4 text-white" />
+                          )}
                         </div>
                         <div>
-                          <span className="block font-black text-slate-700">Dịch trên tất cả trang web</span>
-                          <span className="block text-xs text-slate-400 font-medium">Mặc định bật tính năng dịch trên mọi URL</span>
+                          <span className="block font-black text-slate-700">
+                            Dịch trên tất cả trang web
+                          </span>
+                          <span className="block text-xs text-slate-400 font-medium">
+                            Mặc định bật tính năng dịch trên mọi URL
+                          </span>
                         </div>
                       </div>
-                      <input 
-                        type="checkbox" 
-                        className="hidden" 
+                      <input
+                        type="checkbox"
+                        className="hidden"
                         checked={extSettings.translation.enabled_all}
-                        onChange={(e) => handleUpdateExtSettings({ translation: { ...extSettings.translation, enabled_all: e.target.checked } })}
+                        onChange={(e) =>
+                          handleUpdateExtSettings({
+                            translation: {
+                              ...extSettings.translation,
+                              enabled_all: e.target.checked,
+                            },
+                          })
+                        }
                       />
                     </label>
 
                     {!extSettings.translation.enabled_all && (
                       <div className="mt-8 space-y-4 animate-in slide-in-from-top-4 duration-300">
                         <div className="flex gap-3">
-                          <input 
-                            type="text" 
+                          <input
+                            type="text"
                             placeholder="Nhập URL trang web (vd: example.com)"
                             value={newUrl}
                             onChange={(e) => setNewUrl(e.target.value)}
                             className="flex-1 bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 outline-none font-bold text-slate-700 focus:border-indigo-500 transition-all"
-                            onKeyDown={(e) => e.key === 'Enter' && addUrl()}
+                            onKeyDown={(e) => e.key === "Enter" && addUrl()}
                           />
-                          <button 
+                          <button
                             onClick={addUrl}
                             className="bg-indigo-600 text-white p-4 rounded-2xl hover:bg-indigo-700 transition-all"
                           >
@@ -384,15 +426,105 @@ export default function SettingsPage() {
                           </button>
                         </div>
                         <div className="flex flex-wrap gap-2">
-                          {extSettings.translation.allowed_urls.map(url => (
-                            <div key={url} className="flex items-center gap-2 px-4 py-2 bg-indigo-50 text-indigo-600 rounded-xl font-black text-sm border border-indigo-100">
+                          {extSettings.translation.allowed_urls.map((url) => (
+                            <div
+                              key={url}
+                              className="flex items-center gap-2 px-4 py-2 bg-indigo-50 text-indigo-600 rounded-xl font-black text-sm border border-indigo-100"
+                            >
                               {url}
-                              <button onClick={() => removeUrl(url)}><Trash2 className="w-4 h-4 text-rose-500" /></button>
+                              <button onClick={() => removeUrl(url)}>
+                                <Trash2 className="w-4 h-4 text-rose-500" />
+                              </button>
                             </div>
                           ))}
                         </div>
                       </div>
                     )}
+
+                    {/* Translation Feature Options */}
+                    <div className="mt-6 pt-6 border-t border-slate-100">
+                      <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-4">
+                        Tính năng khi dịch
+                      </p>
+                      <div className="space-y-3">
+                        {[
+                          {
+                            key: "analysis",
+                            label: "🔍 Phân tích ngữ pháp (Analysis)",
+                            desc: "Phân tích từ loại, cấu trúc câu với AI NLP",
+                            badge: "AI NLP",
+                          },
+                          {
+                            key: "vocab",
+                            label: "📚 Thu thập từ mới (Vocab)",
+                            desc: "Trích xuất & lưu từ vựng vào kho cá nhân",
+                            badge: "Quan trọng",
+                          },
+                          {
+                            key: "typo",
+                            label: "✍️ Sửa lỗi chính tả (Typo)",
+                            desc: "Phát hiện và gợi ý sửa lỗi gõ tiếng Anh",
+                          },
+                          {
+                            key: "quick_translate",
+                            label: "🖱️ Dịch nhanh khi bôi đen",
+                            desc: "Hiện tooltip dịch tức thì khi bôi đen văn bản",
+                          },
+                        ].map(({ key, label, desc, badge }) => (
+                          <label
+                            key={key}
+                            className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl cursor-pointer group hover:bg-slate-100 transition-all border border-transparent hover:border-slate-200"
+                          >
+                            <div className="flex items-start gap-3">
+                              <div
+                                className={`w-5 h-5 mt-0.5 rounded border-2 flex items-center justify-center transition-all shrink-0 ${extSettings.translation[key] !== false ? "bg-indigo-600 border-indigo-600" : "border-slate-300"}`}
+                              >
+                                {extSettings.translation[key] !== false && (
+                                  <Check className="w-3 h-3 text-white" />
+                                )}
+                              </div>
+                              <div>
+                                <span className="flex items-center gap-2 font-bold text-slate-700 text-sm">
+                                  {label}
+                                  {badge && (
+                                    <span
+                                      className={`text-xs px-2 py-0.5 rounded-full font-bold ${badge === "AI NLP" ? "bg-purple-100 text-purple-700" : "bg-amber-100 text-amber-700"}`}
+                                    >
+                                      {badge}
+                                    </span>
+                                  )}
+                                </span>
+                                <span className="block text-xs text-slate-400 font-medium">
+                                  {desc}
+                                </span>
+                              </div>
+                            </div>
+                            <input
+                              type="checkbox"
+                              className="hidden"
+                              checked={extSettings.translation[key] !== false}
+                              onChange={(e) =>
+                                handleUpdateExtSettings({
+                                  translation: {
+                                    ...extSettings.translation,
+                                    [key]: e.target.checked,
+                                  },
+                                })
+                              }
+                            />
+                          </label>
+                        ))}
+                      </div>
+                      <div className="mt-4 p-4 bg-blue-50 border border-blue-100 rounded-2xl flex gap-3">
+                        <HelpCircle className="w-5 h-5 text-blue-500 shrink-0 mt-0.5" />
+                        <p className="text-xs font-semibold text-blue-700 leading-relaxed">
+                          Khi <b>Phân tích</b> hoặc <b>Thu thập từ mới</b> được
+                          bật, extension tự động gọi{" "}
+                          <b>API thông minh đầy đủ</b> thay vì API đơn giản —
+                          giúp không bỏ sót từ vựng và phân tích chính xác hơn.
+                        </p>
+                      </div>
+                    </div>
                   </div>
                 </div>
 
@@ -403,34 +535,57 @@ export default function SettingsPage() {
                       <History className="w-6 h-6" />
                     </div>
                     <div>
-                      <h2 className="text-xl font-black text-slate-800">Lịch sử & Thống kê</h2>
-                      <p className="text-xs text-slate-400 font-bold uppercase tracking-widest">Data collection</p>
+                      <h2 className="text-xl font-black text-slate-800">
+                        Lịch sử & Thống kê
+                      </h2>
+                      <p className="text-xs text-slate-400 font-bold uppercase tracking-widest">
+                        Data collection
+                      </p>
                     </div>
                   </div>
 
                   <div className="space-y-6">
                     <label className="flex items-center justify-between p-6 bg-slate-50 rounded-3xl cursor-pointer group hover:bg-slate-100 transition-all border border-transparent hover:border-slate-200">
                       <div className="flex items-center gap-4">
-                        <div className={`w-6 h-6 rounded-md border-2 flex items-center justify-center transition-all ${extSettings.history.collect_all ? 'bg-indigo-600 border-indigo-600' : 'border-slate-300'}`}>
-                          {extSettings.history.collect_all && <Check className="w-4 h-4 text-white" />}
+                        <div
+                          className={`w-6 h-6 rounded-md border-2 flex items-center justify-center transition-all ${extSettings.history.collect_all ? "bg-indigo-600 border-indigo-600" : "border-slate-300"}`}
+                        >
+                          {extSettings.history.collect_all && (
+                            <Check className="w-4 h-4 text-white" />
+                          )}
                         </div>
                         <div>
-                          <span className="block font-black text-slate-700">Thu thập lịch sử dịch</span>
-                          <span className="block text-xs text-slate-400 font-medium">Lưu lại các từ bạn đã gặp trên các trang web</span>
+                          <span className="block font-black text-slate-700">
+                            Thu thập lịch sử dịch
+                          </span>
+                          <span className="block text-xs text-slate-400 font-medium">
+                            Lưu lại các từ bạn đã gặp trên các trang web
+                          </span>
                         </div>
                       </div>
-                      <input 
-                        type="checkbox" 
-                        className="hidden" 
+                      <input
+                        type="checkbox"
+                        className="hidden"
                         checked={extSettings.history.collect_all}
-                        onChange={(e) => handleUpdateExtSettings({ history: { ...extSettings.history, collect_all: e.target.checked } })}
+                        onChange={(e) =>
+                          handleUpdateExtSettings({
+                            history: {
+                              ...extSettings.history,
+                              collect_all: e.target.checked,
+                            },
+                          })
+                        }
                       />
                     </label>
 
                     <div className="p-6 bg-blue-50 border border-blue-100 rounded-3xl flex gap-4">
                       <HelpCircle className="w-6 h-6 text-blue-500 shrink-0" />
                       <p className="text-xs font-bold text-blue-700 leading-relaxed">
-                        <b>Tại sao chúng tôi thu thập dữ liệu?</b> Hệ thống sử dụng lịch sử này để thống kê xem bạn dịch ở trang nào nhiều nhất, gặp từ gì thường xuyên nhất. Từ đó, chúng tôi cá nhân hóa các bộ thẻ Flashcard để ưu tiên những từ quan trọng nhất với bạn.
+                        <b>Tại sao chúng tôi thu thập dữ liệu?</b> Hệ thống sử
+                        dụng lịch sử này để thống kê xem bạn dịch ở trang nào
+                        nhiều nhất, gặp từ gì thường xuyên nhất. Từ đó, chúng
+                        tôi cá nhân hóa các bộ thẻ Flashcard để ưu tiên những từ
+                        quan trọng nhất với bạn.
                       </p>
                     </div>
                   </div>
@@ -438,50 +593,86 @@ export default function SettingsPage() {
 
                 {/* Section 3: Flashcard Popups */}
                 <div className="bg-white rounded-[2.5rem] p-8 border border-slate-200 shadow-sm relative overflow-hidden">
-                  {!extSettings.flashcard_popup.enabled && <div className="absolute inset-0 bg-white/40 backdrop-blur-[1px] z-10 pointer-events-none" />}
-                  
+                  {!extSettings.flashcard_popup.enabled && (
+                    <div className="absolute inset-0 bg-white/40 backdrop-blur-[1px] z-10 pointer-events-none" />
+                  )}
+
                   <div className="flex items-center justify-between mb-8">
                     <div className="flex items-center gap-4">
                       <div className="w-12 h-12 bg-rose-50 rounded-2xl flex items-center justify-center text-rose-600">
                         <Layout className="w-6 h-6" />
                       </div>
                       <div>
-                        <h2 className="text-xl font-black text-slate-800">Flashcard Ôn tập</h2>
-                        <p className="text-xs text-slate-400 font-bold uppercase tracking-widest">Interactive Reminders</p>
+                        <h2 className="text-xl font-black text-slate-800">
+                          Flashcard Ôn tập
+                        </h2>
+                        <p className="text-xs text-slate-400 font-bold uppercase tracking-widest">
+                          Interactive Reminders
+                        </p>
                       </div>
                     </div>
                     <label className="relative z-20 cursor-pointer">
-                      <input 
-                        type="checkbox" 
+                      <input
+                        type="checkbox"
                         className="sr-only peer"
                         checked={extSettings.flashcard_popup.enabled}
-                        onChange={(e) => handleUpdateExtSettings({ flashcard_popup: { ...extSettings.flashcard_popup, enabled: e.target.checked } })}
+                        onChange={(e) =>
+                          handleUpdateExtSettings({
+                            flashcard_popup: {
+                              ...extSettings.flashcard_popup,
+                              enabled: e.target.checked,
+                            },
+                          })
+                        }
                       />
                       <div className="w-14 h-8 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[4px] after:left-[4px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-6 after:w-6 after:transition-all peer-checked:bg-indigo-600"></div>
                     </label>
                   </div>
 
-                  <div className={`space-y-8 relative z-20 transition-all duration-500 ${!extSettings.flashcard_popup.enabled ? 'opacity-50 grayscale select-none' : ''}`}>
+                  <div
+                    className={`space-y-8 relative z-20 transition-all duration-500 ${!extSettings.flashcard_popup.enabled ? "opacity-50 grayscale select-none" : ""}`}
+                  >
                     <div className="p-6 bg-slate-50 border border-slate-100 rounded-3xl">
                       <p className="text-xs font-bold text-slate-600 leading-relaxed mb-6">
-                        Flashcard sẽ hiển thị ngẫu nhiên khi bạn truy cập các trang web giải trí để giúp bạn ôn tập từ vựng thường xuyên hơn.
+                        Flashcard sẽ hiển thị ngẫu nhiên khi bạn truy cập các
+                        trang web giải trí để giúp bạn ôn tập từ vựng thường
+                        xuyên hơn.
                       </p>
-                      
+
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mt-6">
                         {/* Source Selection */}
                         <div className="space-y-4">
-                          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] ml-2">Nguồn từ vựng (Vocabulary Source)</label>
-                          <select 
+                          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] ml-2">
+                            Nguồn từ vựng (Vocabulary Source)
+                          </label>
+                          <select
                             value={extSettings.flashcard_popup.source}
-                            onChange={(e) => handleUpdateExtSettings({ flashcard_popup: { ...extSettings.flashcard_popup, source: e.target.value } })}
+                            onChange={(e) =>
+                              handleUpdateExtSettings({
+                                flashcard_popup: {
+                                  ...extSettings.flashcard_popup,
+                                  source: e.target.value,
+                                },
+                              })
+                            }
                             className="w-full bg-white border border-slate-200 rounded-2xl p-4 font-black text-sm text-slate-700 outline-none focus:border-indigo-500"
                           >
-                            <option value="saved">Từ vựng đã lưu (Saved)</option>
-                            <option value="flashcard">Lịch sử Flashcard (Review)</option>
-                            <option value="translated">Lịch sử Dịch (Translation)</option>
+                            <option value="saved">
+                              Từ vựng đã lưu (Saved)
+                            </option>
+                            <option value="flashcard">
+                              Lịch sử Flashcard (Review)
+                            </option>
+                            <option value="translated">
+                              Lịch sử Dịch (Translation)
+                            </option>
                             <option value="mix">Tất cả (Mix All)</option>
-                            <option value="most_translated">Dịch nhiều nhất (Top Translated)</option>
-                            <option value="most_failed">Dễ sai nhất (Most Failed)</option>
+                            <option value="most_translated">
+                              Dịch nhiều nhất (Top Translated)
+                            </option>
+                            <option value="most_failed">
+                              Dễ sai nhất (Most Failed)
+                            </option>
                           </select>
                         </div>
 
@@ -489,59 +680,101 @@ export default function SettingsPage() {
                         <div className="space-y-4">
                           <label className="flex justify-between text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] ml-2">
                             <span>Số câu hỏi (Quantity)</span>
-                            <span className="text-indigo-600">{extSettings.flashcard_popup.question_count}</span>
+                            <span className="text-indigo-600">
+                              {extSettings.flashcard_popup.question_count}
+                            </span>
                           </label>
-                          <input 
-                            type="range" min="5" max="20" step="1"
+                          <input
+                            type="range"
+                            min="5"
+                            max="20"
+                            step="1"
                             value={extSettings.flashcard_popup.question_count}
-                            onChange={(e) => handleUpdateExtSettings({ flashcard_popup: { ...extSettings.flashcard_popup, question_count: parseInt(e.target.value) } })}
+                            onChange={(e) =>
+                              handleUpdateExtSettings({
+                                flashcard_popup: {
+                                  ...extSettings.flashcard_popup,
+                                  question_count: parseInt(e.target.value),
+                                },
+                              })
+                            }
                             className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
                           />
                         </div>
 
                         {/* Timeout */}
                         <div className="space-y-4">
-                          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] ml-2">Thời gian chờ (Popup Delay)</label>
+                          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] ml-2">
+                            Thời gian chờ (Popup Delay)
+                          </label>
                           <div className="relative">
                             <Clock className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                            <input 
-                              type="number" 
+                            <input
+                              type="number"
                               value={extSettings.flashcard_popup.timeout}
-                              onChange={(e) => handleUpdateExtSettings({ flashcard_popup: { ...extSettings.flashcard_popup, timeout: parseInt(e.target.value) } })}
+                              onChange={(e) =>
+                                handleUpdateExtSettings({
+                                  flashcard_popup: {
+                                    ...extSettings.flashcard_popup,
+                                    timeout: parseInt(e.target.value),
+                                  },
+                                })
+                              }
                               className="w-full bg-white border border-slate-200 rounded-2xl pl-12 pr-4 py-4 font-black text-sm text-slate-700 outline-none"
                             />
-                            <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] font-black text-slate-400 uppercase">phút</span>
+                            <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] font-black text-slate-400 uppercase">
+                              phút
+                            </span>
                           </div>
-                          <p className="text-[10px] text-slate-400 font-bold px-2 italic">Flashcard sẽ hiện sau khi bạn vào trang được X phút</p>
+                          <p className="text-[10px] text-slate-400 font-bold px-2 italic">
+                            Flashcard sẽ hiện sau khi bạn vào trang được X phút
+                          </p>
                         </div>
 
                         {/* Daily Frequency */}
                         <div className="space-y-4">
                           <label className="flex justify-between text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] ml-2">
                             <span>Tần suất xuất hiện (Daily)</span>
-                            <span className="text-indigo-600 font-black">{extSettings.flashcard_popup.daily_frequency} lần/ngày</span>
+                            <span className="text-indigo-600 font-black">
+                              {extSettings.flashcard_popup.daily_frequency}{" "}
+                              lần/ngày
+                            </span>
                           </label>
-                          <input 
-                            type="range" min="3" max="10" step="1"
+                          <input
+                            type="range"
+                            min="3"
+                            max="10"
+                            step="1"
                             value={extSettings.flashcard_popup.daily_frequency}
-                            onChange={(e) => handleUpdateExtSettings({ flashcard_popup: { ...extSettings.flashcard_popup, daily_frequency: parseInt(e.target.value) } })}
+                            onChange={(e) =>
+                              handleUpdateExtSettings({
+                                flashcard_popup: {
+                                  ...extSettings.flashcard_popup,
+                                  daily_frequency: parseInt(e.target.value),
+                                },
+                              })
+                            }
                             className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-amber-500"
                           />
                         </div>
 
                         {/* Entertainment Sites List */}
                         <div className="md:col-span-2 space-y-4 mt-4 border-t border-slate-100 pt-8">
-                          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] ml-2 mb-4">Trang web giải trí (Entertainment Sites)</label>
+                          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] ml-2 mb-4">
+                            Trang web giải trí (Entertainment Sites)
+                          </label>
                           <div className="flex gap-3 mb-4">
-                            <input 
-                              type="text" 
+                            <input
+                              type="text"
                               placeholder="Thêm trang giải trí (vd: netflix.com)"
                               value={newEntUrl}
                               onChange={(e) => setNewEntUrl(e.target.value)}
                               className="flex-1 bg-white border border-slate-200 rounded-2xl px-6 py-4 outline-none font-bold text-slate-700 focus:border-indigo-500 transition-all text-sm"
-                              onKeyDown={(e) => e.key === 'Enter' && addEntUrl()}
+                              onKeyDown={(e) =>
+                                e.key === "Enter" && addEntUrl()
+                              }
                             />
-                            <button 
+                            <button
                               onClick={addEntUrl}
                               className="bg-slate-900 text-white px-6 rounded-2xl hover:bg-black transition-all font-black text-xs uppercase tracking-widest"
                             >
@@ -549,22 +782,39 @@ export default function SettingsPage() {
                             </button>
                           </div>
                           <div className="flex flex-wrap gap-3">
-                            {extSettings.flashcard_popup.entertainment_urls?.map(item => (
-                              <div key={item.url} className={`flex items-center gap-3 px-4 py-3 bg-white border rounded-2xl shadow-sm transition-all group ${item.enabled ? 'border-slate-200' : 'border-slate-100 opacity-60'}`}>
-                                <div 
-                                  onClick={() => toggleEntUrl(item.url)}
-                                  className={`w-8 h-4 rounded-full relative cursor-pointer transition-all ${item.enabled ? 'bg-indigo-500' : 'bg-slate-200'}`}
+                            {extSettings.flashcard_popup.entertainment_urls?.map(
+                              (item) => (
+                                <div
+                                  key={item.url}
+                                  className={`flex items-center gap-3 px-4 py-3 bg-white border rounded-2xl shadow-sm transition-all group ${item.enabled ? "border-slate-200" : "border-slate-100 opacity-60"}`}
                                 >
-                                  <div className={`absolute top-1 w-2 h-2 bg-white rounded-full transition-all ${item.enabled ? 'right-1' : 'left-1'}`} />
+                                  <div
+                                    onClick={() => toggleEntUrl(item.url)}
+                                    className={`w-8 h-4 rounded-full relative cursor-pointer transition-all ${item.enabled ? "bg-indigo-500" : "bg-slate-200"}`}
+                                  >
+                                    <div
+                                      className={`absolute top-1 w-2 h-2 bg-white rounded-full transition-all ${item.enabled ? "right-1" : "left-1"}`}
+                                    />
+                                  </div>
+                                  <span
+                                    className={`text-xs font-black ${item.enabled ? "text-slate-600" : "text-slate-400 line-through"}`}
+                                  >
+                                    {item.url}
+                                  </span>
+                                  <button
+                                    onClick={() => removeEntUrl(item.url)}
+                                    className="opacity-0 group-hover:opacity-100 transition-all text-rose-500 ml-2"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
                                 </div>
-                                <span className={`text-xs font-black ${item.enabled ? 'text-slate-600' : 'text-slate-400 line-through'}`}>{item.url}</span>
-                                <button onClick={() => removeEntUrl(item.url)} className="opacity-0 group-hover:opacity-100 transition-all text-rose-500 ml-2">
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
-                              </div>
-                            ))}
+                              ),
+                            )}
                           </div>
-                          <p className="text-[10px] text-slate-400 font-bold px-2 italic mt-4">Flashcard sẽ chỉ hiện khi bạn truy cập các trang này sau thời gian chờ</p>
+                          <p className="text-[10px] text-slate-400 font-bold px-2 italic mt-4">
+                            Flashcard sẽ chỉ hiện khi bạn truy cập các trang này
+                            sau thời gian chờ
+                          </p>
                         </div>
                       </div>
                     </div>
@@ -577,21 +827,18 @@ export default function SettingsPage() {
                       <Shield className="w-6 h-6 text-indigo-400" />
                     </div>
                     <div>
-                      <h4 className="font-black text-lg">Đang đồng bộ trực tuyến</h4>
-                      <p className="text-xs text-slate-400 font-bold uppercase tracking-widest">Cloud sync active</p>
+                      <h4 className="font-black text-lg">
+                        Cài đặt lưu trên trình duyệt
+                      </h4>
+                      <p className="text-xs text-slate-400 font-bold uppercase tracking-widest">
+                        Local storage saved
+                      </p>
                     </div>
                   </div>
-                  {savingExt ? (
-                    <div className="flex items-center gap-2 text-indigo-400 font-black uppercase text-[10px] tracking-widest">
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      Đang lưu...
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-2 text-emerald-400 font-black uppercase text-[10px] tracking-widest">
-                      <Check className="w-4 h-4" />
-                      Đã lưu
-                    </div>
-                  )}
+                  <div className="flex items-center gap-2 text-emerald-400 font-black uppercase text-[10px] tracking-widest">
+                    <Check className="w-4 h-4" />
+                    Đã lưu
+                  </div>
                 </div>
               </div>
             )}

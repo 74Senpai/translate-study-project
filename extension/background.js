@@ -107,29 +107,6 @@ function getDomainBlacklist() {
   return JSON.parse(JSON.stringify(domainBlacklist));
 }
 
-async function fetchExtensionSettings() {
-  if (!accessToken) return;
-  try {
-    const endpoint = CONFIG.API_BASE_URL
-      ? `${CONFIG.API_BASE_URL}/user/extension-settings`
-      : `${CONFIG.API_URL.replace("/translate", "")}/user/extension-settings`;
-    const response = await makeAuthenticatedRequest(endpoint, {
-      method: "GET",
-    });
-    if (response.ok) {
-      extensionSettings = await response.json();
-      chrome.storage.local.set({ extension_settings: extensionSettings });
-      // Notify content scripts and popup
-      chrome.runtime
-        .sendMessage({
-          action: "settings_updated",
-          settings: extensionSettings,
-        })
-        .catch(() => { });
-    }
-  } catch (error) { }
-}
-
 async function logoutLocal() {
   accessToken = null;
   refreshToken = null;
@@ -235,68 +212,7 @@ async function setupTokenRefreshOnStartup() {
   }
 }
 
-// Setup settings polling (every 30 seconds)
-async function setupSettingsPolling() {
-  if (accessToken) {
-    try {
-      // Fetch initial settings
-      await fetchExtensionSettings();
-
-      // Setup recurring settings polling alarm (every 30 seconds)
-      chrome.alarms.create("settingsPollingAlarm", { periodInMinutes: 1 });
-    } catch (error) {
-      console.error("Error setting up settings polling:", error);
-    }
-  }
-}
-
-// Store previous settings to detect changes
-let previousSettingsJSON = null;
-
-// Handle settings polling with change detection
-async function pollAndDetectSettingsChange() {
-  if (!accessToken) return;
-
-  try {
-    const endpoint = CONFIG.API_BASE_URL
-      ? `${CONFIG.API_BASE_URL}/user/extension-settings`
-      : `${CONFIG.API_URL.replace("/translate", "")}/user/extension-settings`;
-
-    const response = await makeAuthenticatedRequest(endpoint, {
-      method: "GET",
-    });
-
-    if (response.ok) {
-      const newSettings = await response.json();
-      const newSettingsJSON = JSON.stringify(newSettings);
-
-      // Detect if settings changed
-      if (previousSettingsJSON && previousSettingsJSON !== newSettingsJSON) {
-        console.log("Settings updated, notifying components");
-        extensionSettings = newSettings;
-        chrome.storage.local.set({ extension_settings: newSettings });
-
-        // Notify all components about the change
-        chrome.runtime
-          .sendMessage({
-            action: "settings_changed",
-            settings: newSettings,
-          })
-          .catch(() => { });
-      } else if (!previousSettingsJSON) {
-        // First time loading
-        extensionSettings = newSettings;
-        chrome.storage.local.set({ extension_settings: newSettings });
-      }
-
-      previousSettingsJSON = newSettingsJSON;
-    }
-  } catch (error) {
-    console.error("Error polling settings:", error);
-  }
-}
-
-// Handle token refresh alarm and settings polling alarm
+// Handle token refresh alarm
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === "refreshTokenAlarm") {
     if (accessToken && refreshToken) {
@@ -304,11 +220,6 @@ chrome.alarms.onAlarm.addListener((alarm) => {
         console.error("Error refreshing token on alarm:", error);
       });
     }
-  }
-  if (alarm.name === "settingsPollingAlarm") {
-    pollAndDetectSettingsChange().catch((error) => {
-      console.error("Error polling settings on alarm:", error);
-    });
   }
 });
 
@@ -464,12 +375,43 @@ async function trackWordEncounter(word, url) {
   } catch (e) { }
 }
 
+const DEFAULT_TRANSLATION_OPTIONS = {
+  analysis: true,
+  vocab: true,
+  typo: true,
+  quick_translate: true,
+};
+
+let translationOptions = { ...DEFAULT_TRANSLATION_OPTIONS };
+
+chrome.storage.local.get(["translation_options"], (result) => {
+  if (result.translation_options) {
+    translationOptions = { ...DEFAULT_TRANSLATION_OPTIONS, ...result.translation_options };
+  }
+});
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "local" && changes.translation_options) {
+    translationOptions = { ...DEFAULT_TRANSLATION_OPTIONS, ...changes.translation_options.newValue };
+  }
+});
+
 function buildTranslationKey(text, mode, isFull = false) {
   return `${mode || "default"}:${isFull ? "full" : "simple"}:${text}`;
 }
 
-function readCache(cacheKey) {
-  return translationCache.get(cacheKey) || null;
+function readCache(cacheKey, isFull = false) {
+  if (translationCache.has(cacheKey)) {
+    return translationCache.get(cacheKey);
+  }
+  // If requesting simple, a cached full translation can satisfy it
+  if (!isFull) {
+    const fullKey = cacheKey.replace(":simple:", ":full:");
+    if (translationCache.has(fullKey)) {
+      return translationCache.get(fullKey);
+    }
+  }
+  return null;
 }
 
 let persistTimeout = null;
@@ -506,17 +448,24 @@ function writeCache(cacheKey, data) {
   persistCacheDebounced();
 }
 
-async function fetchTranslation(
+// Real-time NDJSON Stream Translation Engine
+async function streamTranslation(
   text,
+  mode,
+  options,
+  needsFull,
   cacheKey,
-  mode = "vi-en",
-  isFull = false,
-  isRetry = false,
+  onChunk,
+  onDone,
+  onError,
 ) {
   try {
     const validMode = mode === "en-vi" || mode === "vi-en" ? mode : "vi-en";
     const sourceLang = validMode === "en-vi" ? "en" : "vi";
     const targetLang = validMode === "en-vi" ? "vi" : "en";
+
+    // Only allow personal vocab collection if user is authenticated
+    const canSaveVocab = !!accessToken && options.vocab !== false;
 
     const requestPayload = {
       text: text,
@@ -524,186 +473,305 @@ async function fetchTranslation(
         source_lang: sourceLang,
         target_lang: targetLang,
       },
+      option: {
+        analysis: options.analysis !== false,
+        vocab: canSaveVocab,
+        typo: options.typo !== false,
+      },
     };
 
-    if (!isFull) {
-      // 1. Dịch nhanh qua endpoint: /api/v1/translate/simple
-      const endpoint = `${API_URL}/simple`;
-      const response = await makeAuthenticatedRequest(endpoint, {
-        method: "POST",
-        body: JSON.stringify(requestPayload),
-      });
+    // Use /stream endpoint for full workflow streaming, /simple for ultra-fast simple translation
+    const endpoint = needsFull ? `${API_URL}/stream` : `${API_URL}/simple`;
 
-      const rawBody = await response.text();
-      if (!response.ok) {
-        let errMessage = `HTTP ${response.status}`;
-        try {
-          const errObj = JSON.parse(rawBody);
-          errMessage = errObj.detail || errObj.message || errObj.error || errMessage;
-        } catch (_) {}
-        return { success: false, error: errMessage };
-      }
+    const response = await makeAuthenticatedRequest(endpoint, {
+      method: "POST",
+      body: JSON.stringify(requestPayload),
+    });
 
-      // Backend /simple trả về NDJSON chunks của SimpleTranslateResponse
-      const lines = rawBody.split("\n").filter((l) => l.trim());
-      const translatedParts = [];
-      let originalText = text;
+    if (!response.ok) {
+      let errText = await response.text();
+      try {
+        const errObj = JSON.parse(errText);
+        errText = errObj.detail || errObj.message || errObj.error || errText;
+      } catch (_) {}
+      onError(errText || `HTTP ${response.status}`);
+      return;
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder("utf-8");
+    let buffer = "";
+    let accumulatedTranslation = "";
+    let originalText = text;
+    const posTags = [];
+    const vocabMap = {};
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop(); // keep remainder for next chunk
 
       for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
         try {
-          const parsed = JSON.parse(line);
-          if (parsed.translated_text) {
-            translatedParts.push(parsed.translated_text);
-          }
-          if (parsed.original_text) {
-            originalText = parsed.original_text;
-          }
-        } catch (_) {}
-      }
+          const item = JSON.parse(trimmed);
 
-      const finalTranslated = translatedParts.join(" ").trim();
-      if (!finalTranslated) {
-        return {
-          success: false,
-          error: "Empty translation response",
-        };
-      }
-
-      const resultData = {
-        original_text: originalText,
-        translated_text: finalTranslated,
-        source_lang: sourceLang,
-        target_lang: targetLang,
-        pos_tags: [],
-      };
-
-      writeCache(cacheKey, resultData);
-      return { success: true, data: resultData, translatedText: finalTranslated };
-    } else {
-      // 2. Dịch chi tiết + NLP analysis qua endpoint: /api/v1/translate/
-      const endpoint = `${API_URL}/`;
-      const response = await makeAuthenticatedRequest(endpoint, {
-        method: "POST",
-        body: JSON.stringify(requestPayload),
-      });
-
-      const rawBody = await response.text();
-      if (!response.ok) {
-        let errMessage = `HTTP ${response.status}`;
-        try {
-          const errObj = JSON.parse(rawBody);
-          errMessage = errObj.detail || errObj.message || errObj.error || errMessage;
-        } catch (_) {}
-        return { success: false, error: errMessage };
-      }
-
-      let workflowItems = null;
-      try {
-        workflowItems = JSON.parse(rawBody);
-      } catch (e) {
-        return { success: false, error: "Invalid JSON response" };
-      }
-
-      if (!Array.isArray(workflowItems)) {
-        return { success: false, error: "Invalid response format" };
-      }
-
-      let translatedText = "";
-      let originalText = text;
-      let posTags = [];
-      const vocabMap = {};
-
-      for (const item of workflowItems) {
-        if (!item || !item.type_response) continue;
-
-        if (item.type_response === "TRANSLATE" && item.data) {
-          if (item.data.translated_text) {
-            translatedText = (translatedText ? translatedText + " " : "") + item.data.translated_text;
-          }
-          if (item.data.original_text) {
-            originalText = item.data.original_text;
-          }
-        } else if (item.type_response === "VOCAB" && item.data?.vocabularies) {
-          for (const v of item.data.vocabularies) {
-            const w = (v.word || "").toLowerCase();
-            const meaning = v.contextual_meaning || v.concept_definition || "";
-            if (w && meaning) {
-              vocabMap[w] = meaning;
+          if (!needsFull) {
+            // SimpleTranslateResponse stream line
+            if (item.translated_text) {
+              accumulatedTranslation = (accumulatedTranslation ? accumulatedTranslation + " " : "") + item.translated_text;
+              onChunk({ chunk: item.translated_text, accumulated: accumulatedTranslation });
+            }
+            if (item.original_text) originalText = item.original_text;
+          } else {
+            // TranslateWorkflowResponse stream line
+            if (item.type_response === "TRANSLATE" && item.data?.translated_text) {
+              accumulatedTranslation = (accumulatedTranslation ? accumulatedTranslation + " " : "") + item.data.translated_text;
+              onChunk({ chunk: item.data.translated_text, accumulated: accumulatedTranslation });
+              if (item.data.original_text) originalText = item.data.original_text;
+            } else if (item.type_response === "VOCAB" && item.data?.vocabularies) {
+              for (const v of item.data.vocabularies) {
+                const w = (v.word || "").toLowerCase();
+                const meaning = v.contextual_meaning || v.concept_definition || "";
+                if (w && meaning) vocabMap[w] = meaning;
+              }
+            } else if (item.type_response === "ANALYSIS" && item.data?.tokens) {
+              for (const tok of item.data.tokens) {
+                posTags.push({
+                  text: tok.text,
+                  pos: tok.pos || "NOUN",
+                  tag: tok.tag || "",
+                  lemma: tok.lemma || "",
+                  meaning: vocabMap[tok.text.toLowerCase()] || tok.lemma || "",
+                });
+              }
             }
           }
-        } else if (item.type_response === "ANALYSIS" && item.data?.tokens) {
-          for (const tok of item.data.tokens) {
-            posTags.push({
-              text: tok.text,
-              pos: tok.pos || "NOUN",
-              tag: tok.tag || "",
-              lemma: tok.lemma || "",
-              meaning: vocabMap[tok.text.toLowerCase()] || tok.lemma || "",
-            });
-          }
-        }
+        } catch (_) {}
       }
-
-      translatedText = translatedText.trim();
-      if (!translatedText) {
-        return { success: false, error: "Empty translation response" };
-      }
-
-      // Bổ sung meaning nếu vocab xuất hiện sau analysis
-      for (const tag of posTags) {
-        if (!tag.meaning && vocabMap[tag.text.toLowerCase()]) {
-          tag.meaning = vocabMap[tag.text.toLowerCase()];
-        }
-      }
-
-      const resultData = {
-        original_text: originalText,
-        translated_text: translatedText,
-        source_lang: sourceLang,
-        target_lang: targetLang,
-        pos_tags: posTags,
-      };
-
-      writeCache(cacheKey, resultData);
-      return { success: true, data: resultData, translatedText: translatedText };
     }
-  } catch (error) {
-    return {
-      success: false,
-      error: error && error.message ? error.message : String(error),
+
+    // Flush any leftover buffer
+    if (buffer.trim()) {
+      try {
+        const item = JSON.parse(buffer.trim());
+        if (!needsFull && item.translated_text) {
+          accumulatedTranslation = (accumulatedTranslation ? accumulatedTranslation + " " : "") + item.translated_text;
+          onChunk({ chunk: item.translated_text, accumulated: accumulatedTranslation });
+        } else if (needsFull && item.type_response === "TRANSLATE" && item.data?.translated_text) {
+          accumulatedTranslation = (accumulatedTranslation ? accumulatedTranslation + " " : "") + item.data.translated_text;
+          onChunk({ chunk: item.data.translated_text, accumulated: accumulatedTranslation });
+        }
+      } catch (_) {}
+    }
+
+    accumulatedTranslation = accumulatedTranslation.trim();
+    if (!accumulatedTranslation) {
+      onError("Empty translation response");
+      return;
+    }
+
+    // Link meanings to posTags
+    for (const tag of posTags) {
+      if (!tag.meaning && vocabMap[tag.text.toLowerCase()]) {
+        tag.meaning = vocabMap[tag.text.toLowerCase()];
+      }
+    }
+
+    const vocabList = Object.entries(vocabMap).map(([word, meaning]) => ({
+      word,
+      meaning,
+    }));
+
+    const resultData = {
+      original_text: originalText,
+      translated_text: accumulatedTranslation,
+      source_lang: sourceLang,
+      target_lang: targetLang,
+      pos_tags: posTags,
+      vocabularies: vocabList,
     };
+
+    if (cacheKey) {
+      writeCache(cacheKey, resultData);
+    }
+
+    onDone({ data: resultData, translatedText: accumulatedTranslation });
+  } catch (error) {
+    onError(error && error.message ? error.message : String(error));
   }
 }
 
-chrome.runtime.onConnect.addListener((port) => {
-  if (port.name !== "popup_connection") return;
-
-  openViews++;
-  chrome.storage.local.set({ isPinnedActive: true });
-
-  port.onDisconnect.addListener(() => {
-    openViews--;
-    if (openViews <= 0) {
-      openViews = 0;
-      chrome.storage.local.set({ isPinnedActive: false });
-    }
+async function fetchTranslation(
+  text,
+  cacheKey,
+  mode = "vi-en",
+  isFull = false,
+  isRetry = false,
+  options = {},
+) {
+  return new Promise((resolve) => {
+    streamTranslation(
+      text,
+      mode,
+      options,
+      isFull,
+      cacheKey,
+      () => {}, // chunk callback ignored for full batch promise
+      (doneResult) => {
+        resolve({
+          success: true,
+          data: doneResult.data,
+          translatedText: doneResult.translatedText,
+        });
+      },
+      (errorMsg) => {
+        resolve({
+          success: false,
+          error: errorMsg,
+        });
+      },
+    );
   });
+}
+
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name === "popup_connection") {
+    openViews++;
+    chrome.storage.local.set({ isPinnedActive: true });
+
+    port.onDisconnect.addListener(() => {
+      openViews--;
+      if (openViews <= 0) {
+        openViews = 0;
+        chrome.storage.local.set({ isPinnedActive: false });
+      }
+    });
+    return;
+  }
+
+  // Streaming translation port for text selection (bôi đen)
+  if (port.name === "translate_stream") {
+    port.onMessage.addListener((msg) => {
+      if (msg.action === "translate_stream") {
+        const text = (msg.text || "").trim();
+        const mode = msg.mode || "default";
+        const requestId = msg.requestId;
+        const effectiveOptions = {
+          ...translationOptions,
+          ...(msg.options || {}),
+        };
+
+        // Personal vocab collection requires login
+        if (!accessToken) {
+          effectiveOptions.vocab = false;
+        }
+
+        if (!text) {
+          port.postMessage({ type: "error", error: "Empty text", requestId });
+          return;
+        }
+
+        const needsFull = effectiveOptions.vocab !== false || effectiveOptions.analysis !== false;
+        const cacheKey = buildTranslationKey(text, mode, needsFull);
+        const cached = readCache(cacheKey, needsFull);
+
+        if (cached) {
+          port.postMessage({
+            type: "chunk",
+            text: cached.translated_text,
+            accumulated: cached.translated_text,
+            requestId,
+          });
+          port.postMessage({
+            type: "done",
+            data: cached,
+            translatedText: cached.translated_text,
+            requestId,
+          });
+          return;
+        }
+
+        streamTranslation(
+          text,
+          mode,
+          effectiveOptions,
+          needsFull,
+          cacheKey,
+          (chunkInfo) => {
+            try {
+              port.postMessage({
+                type: "chunk",
+                text: chunkInfo.chunk,
+                accumulated: chunkInfo.accumulated,
+                requestId,
+              });
+            } catch (_) {}
+          },
+          (doneResult) => {
+            try {
+              port.postMessage({
+                type: "done",
+                data: doneResult.data,
+                translatedText: doneResult.translatedText,
+                requestId,
+              });
+            } catch (_) {}
+          },
+          (errorMsg) => {
+            try {
+              port.postMessage({
+                type: "error",
+                error: errorMsg,
+                requestId,
+              });
+            } catch (_) {}
+          },
+        );
+      }
+    });
+  }
 });
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === "translate") {
     const text = (request.text || "").trim();
     const mode = request.mode || "default";
-    const isFull = !!request.full;
-    const cacheKey = buildTranslationKey(text, mode, isFull);
     const forceRefresh = request.forceRefresh === true;
+
+    // Merge options: request.options overrides global translationOptions
+    const effectiveOptions = {
+      ...translationOptions,
+      ...(request.options || {}),
+    };
+
+    // Determine API mode:
+    // 1. Explicit request.quickOnly: use Simple API
+    // 2. Explicit request.full: follow request.full
+    // 3. Otherwise (e.g. selection / bôi đen from content script):
+    //    If vocab OR analysis is enabled -> MUST USE FULL API so vocabulary is collected & analysis generated!
+    //    If both vocab AND analysis are disabled -> use Simple API
+    let isFull = false;
+    if (request.quickOnly) {
+      isFull = false;
+    } else if (request.full !== undefined) {
+      isFull = !!request.full;
+    } else {
+      isFull = effectiveOptions.vocab !== false || effectiveOptions.analysis !== false;
+    }
+
+    const cacheKey = buildTranslationKey(text, mode, isFull);
 
     if (!text) {
       sendResponse({ success: false, error: "Empty text" });
       return false;
     }
 
-    const cached = readCache(cacheKey);
+    const cached = readCache(cacheKey, isFull);
     if (!forceRefresh && cached) {
       sendResponse({
         success: true,
@@ -730,6 +798,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       cacheKey,
       mode,
       isFull,
+      false,
+      effectiveOptions,
     ).finally(() => {
       inFlightRequests.delete(cacheKey);
     });
@@ -742,6 +812,18 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       }
     });
     return true;
+  }
+
+  if (request.action === "get_translation_options") {
+    sendResponse({ options: translationOptions });
+    return false;
+  }
+
+  if (request.action === "set_translation_options") {
+    translationOptions = { ...translationOptions, ...(request.options || {}) };
+    chrome.storage.local.set({ translation_options: translationOptions });
+    sendResponse({ success: true, options: translationOptions });
+    return false;
   }
 
   if (request.action === "detect") {
@@ -838,8 +920,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       })
       .catch(() => { });
 
-    fetchExtensionSettings();
-
     sendResponse({ success: true });
     return true;
   }
@@ -931,7 +1011,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                   avatarUrl,
                 }).catch(() => {});
                 
-                fetchExtensionSettings();
                 sendResponse({
                   success: true,
                   displayName,
@@ -1213,10 +1292,4 @@ if (typeof chrome !== "undefined" && chrome.alarms) {
   });
 }
 
-// Periodic settings sync
-setInterval(
-  () => {
-    if (typeof fetchExtensionSettings === "function") fetchExtensionSettings();
-  },
-  1000 * 60 * 30,
-);
+

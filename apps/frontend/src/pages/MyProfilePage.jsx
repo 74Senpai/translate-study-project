@@ -86,7 +86,9 @@ export default function MyProfilePage() {
       if (wordsSort) params.append("sort_by", wordsSort);
       params.append("limit", "100");
 
-      const { data } = await axiosInstance.get(`/user/words?${params.toString()}`);
+      const { data } = await axiosInstance.get(
+        `/user/words?${params.toString()}`,
+      );
       setWords(data.items || []);
     } catch (err) {
       console.error("Error fetching words:", err);
@@ -149,7 +151,10 @@ export default function MyProfilePage() {
       showToast("Cập nhật thông tin cá nhân thành công!");
     } catch (err) {
       console.error("Update profile error:", err);
-      showToast(err.response?.data?.detail || "Không thể cập nhật hồ sơ.", "error");
+      showToast(
+        err.response?.data?.detail || "Không thể cập nhật hồ sơ.",
+        "error",
+      );
     } finally {
       setSavingProfile(false);
     }
@@ -173,7 +178,8 @@ export default function MyProfilePage() {
     setEditingWord(item);
     setWordForm({
       word: item.word,
-      personal_translation: item.personal_translation || item.default_meaning || "",
+      personal_translation:
+        item.personal_translation || item.default_meaning || "",
       personal_context: item.personal_context || "",
       encountered_count: item.encountered_count || 1,
       translated_count: item.translated_count || 1,
@@ -192,12 +198,15 @@ export default function MyProfilePage() {
     setSavingWord(true);
     try {
       if (editingWord) {
-        await axiosInstance.put(`/user/words/${encodeURIComponent(editingWord.word)}`, {
-          personal_translation: wordForm.personal_translation,
-          personal_context: wordForm.personal_context,
-          encountered_count: Number(wordForm.encountered_count),
-          translated_count: Number(wordForm.translated_count),
-        });
+        await axiosInstance.put(
+          `/user/words/${encodeURIComponent(editingWord.word)}`,
+          {
+            personal_translation: wordForm.personal_translation,
+            personal_context: wordForm.personal_context,
+            encountered_count: Number(wordForm.encountered_count),
+            translated_count: Number(wordForm.translated_count),
+          },
+        );
         showToast(`Đã lưu bản dịch cá nhân cho '${editingWord.word}'!`);
       } else {
         await axiosInstance.post("/user/words", {
@@ -222,7 +231,11 @@ export default function MyProfilePage() {
 
   // Delete word
   const handleDeleteWord = async (wordText) => {
-    if (!window.confirm(`Bạn có chắc chắn muốn xóa từ '${wordText}' khỏi kho cá nhân không?`)) {
+    if (
+      !window.confirm(
+        `Bạn có chắc chắn muốn xóa từ '${wordText}' khỏi kho cá nhân không?`,
+      )
+    ) {
       return;
     }
     try {
@@ -273,7 +286,11 @@ export default function MyProfilePage() {
             toast.type === "error" ? "bg-rose-600" : "bg-emerald-600"
           }`}
         >
-          {toast.type === "error" ? <X className="w-5 h-5" /> : <Check className="w-5 h-5" />}
+          {toast.type === "error" ? (
+            <X className="w-5 h-5" />
+          ) : (
+            <Check className="w-5 h-5" />
+          )}
           <span>{toast.message}</span>
         </div>
       )}
@@ -343,7 +360,9 @@ export default function MyProfilePage() {
               <div className="flex flex-wrap items-center justify-center md:justify-start gap-4 text-xs font-bold text-slate-500">
                 <span className="flex items-center gap-1.5">
                   <Mail className="w-3.5 h-3.5 text-slate-400" />
-                  <span>{profile.email || authUser?.email || "Chưa có email"}</span>
+                  <span>
+                    {profile.email || authUser?.email || "Chưa có email"}
+                  </span>
                 </span>
                 <span className="flex items-center gap-1.5">
                   <Calendar className="w-3.5 h-3.5 text-slate-400" />
@@ -394,7 +413,8 @@ export default function MyProfilePage() {
                 <span>Kho từ vựng & Dịch cá nhân</span>
               </h2>
               <p className="text-xs text-slate-400 font-medium mt-1 m-0">
-                Quản lý các từ bạn đã gặp, đã dịch và bản dịch cá nhân theo ngữ cảnh riêng
+                Quản lý các từ bạn đã gặp, đã dịch và bản dịch cá nhân theo ngữ
+                cảnh riêng
               </p>
             </div>
 
@@ -409,7 +429,10 @@ export default function MyProfilePage() {
 
           {/* Search & Sort Filter */}
           <div className="bg-white rounded-3xl border border-slate-100 shadow-sm p-4 flex flex-col md:flex-row gap-4 items-center justify-between">
-            <form onSubmit={handleSearchSubmit} className="relative w-full md:w-96">
+            <form
+              onSubmit={handleSearchSubmit}
+              className="relative w-full md:w-96"
+            >
               <Search className="w-4 h-4 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
@@ -441,7 +464,9 @@ export default function MyProfilePage() {
                 className="p-2.5 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors cursor-pointer"
                 title="Tải lại danh sách"
               >
-                <RefreshCw className={`w-4 h-4 ${wordsLoading ? "animate-spin" : ""}`} />
+                <RefreshCw
+                  className={`w-4 h-4 ${wordsLoading ? "animate-spin" : ""}`}
+                />
               </button>
             </div>
           </div>
@@ -450,16 +475,21 @@ export default function MyProfilePage() {
           {wordsLoading ? (
             <div className="py-20 flex flex-col items-center justify-center gap-3">
               <div className="w-10 h-10 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin" />
-              <p className="text-sm font-bold text-slate-400">Đang tải kho từ vựng...</p>
+              <p className="text-sm font-bold text-slate-400">
+                Đang tải kho từ vựng...
+              </p>
             </div>
           ) : words.length === 0 ? (
             <div className="bg-white rounded-3xl border border-slate-100 shadow-sm p-12 text-center flex flex-col items-center justify-center gap-4">
               <div className="w-16 h-16 rounded-3xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
                 <BookOpen className="w-8 h-8" />
               </div>
-              <h3 className="text-xl font-black text-slate-800 m-0">Chưa có từ vựng nào</h3>
+              <h3 className="text-xl font-black text-slate-800 m-0">
+                Chưa có từ vựng nào
+              </h3>
               <p className="text-sm font-semibold text-slate-500 max-w-md m-0">
-                Các từ xuất hiện trong quá trình học sẽ được lưu vào đây, hoặc bạn có thể tự thêm từ và bản dịch của riêng mình.
+                Các từ xuất hiện trong quá trình học sẽ được lưu vào đây, hoặc
+                bạn có thể tự thêm từ và bản dịch của riêng mình.
               </p>
               <button
                 onClick={openAddWordModal}
@@ -485,7 +515,7 @@ export default function MyProfilePage() {
                             {item.word}
                           </h3>
                           {item.ipa && (
-                            <span className="text-xs text-slate-400 font-mono">
+                            <span className="px-2.5 py-0.5 bg-amber-50 text-amber-700 rounded-lg text-xs font-bold font-mono border border-amber-200 shadow-sm">
                               {item.ipa}
                             </span>
                           )}
@@ -524,7 +554,8 @@ export default function MyProfilePage() {
                       <p className="text-sm font-bold text-slate-800 mt-1 m-0">
                         {item.personal_translation || (
                           <span className="text-slate-400 italic font-normal text-xs">
-                            Chưa có bản dịch cá nhân (Nhấn biểu tượng bút để thêm)
+                            Chưa có bản dịch cá nhân (Nhấn biểu tượng bút để
+                            thêm)
                           </span>
                         )}
                       </p>
@@ -634,7 +665,9 @@ export default function MyProfilePage() {
             </button>
 
             <h3 className="text-xl font-black text-slate-800 m-0 mb-6">
-              {editingWord ? `Sửa dịch cá nhân: '${editingWord.word}'` : "Thêm từ & Bản dịch mới"}
+              {editingWord
+                ? `Sửa dịch cá nhân: '${editingWord.word}'`
+                : "Thêm từ & Bản dịch mới"}
             </h3>
 
             <form onSubmit={handleSaveWord} className="flex flex-col gap-4">
@@ -648,7 +681,9 @@ export default function MyProfilePage() {
                   disabled={!!editingWord}
                   placeholder="Ví dụ: flexible, implement, resilient..."
                   value={wordForm.word}
-                  onChange={(e) => setWordForm({ ...wordForm, word: e.target.value })}
+                  onChange={(e) =>
+                    setWordForm({ ...wordForm, word: e.target.value })
+                  }
                   className={`w-full px-4 py-3 rounded-2xl border text-sm font-bold text-slate-800 transition-all ${
                     editingWord
                       ? "bg-slate-100 border-slate-200 cursor-not-allowed"
@@ -666,7 +701,10 @@ export default function MyProfilePage() {
                   placeholder="Nhập nghĩa bạn muốn nhớ cho từ này..."
                   value={wordForm.personal_translation}
                   onChange={(e) =>
-                    setWordForm({ ...wordForm, personal_translation: e.target.value })
+                    setWordForm({
+                      ...wordForm,
+                      personal_translation: e.target.value,
+                    })
                   }
                   className="w-full px-4 py-3 rounded-2xl bg-slate-50 border border-slate-200 text-sm font-bold text-slate-800 focus:outline-none focus:border-indigo-500 focus:bg-white transition-all"
                 />
@@ -681,7 +719,10 @@ export default function MyProfilePage() {
                   placeholder="Câu ngữ cảnh giúp bạn nhớ từ sâu hơn..."
                   value={wordForm.personal_context}
                   onChange={(e) =>
-                    setWordForm({ ...wordForm, personal_context: e.target.value })
+                    setWordForm({
+                      ...wordForm,
+                      personal_context: e.target.value,
+                    })
                   }
                   className="w-full px-4 py-3 rounded-2xl bg-slate-50 border border-slate-200 text-sm font-medium text-slate-800 focus:outline-none focus:border-indigo-500 focus:bg-white transition-all resize-none"
                 />
@@ -697,7 +738,10 @@ export default function MyProfilePage() {
                     min={0}
                     value={wordForm.encountered_count}
                     onChange={(e) =>
-                      setWordForm({ ...wordForm, encountered_count: e.target.value })
+                      setWordForm({
+                        ...wordForm,
+                        encountered_count: e.target.value,
+                      })
                     }
                     className="w-full px-4 py-3 rounded-2xl bg-slate-50 border border-slate-200 text-sm font-bold text-slate-800 focus:outline-none focus:border-indigo-500 focus:bg-white transition-all"
                   />
@@ -712,7 +756,10 @@ export default function MyProfilePage() {
                     min={0}
                     value={wordForm.translated_count}
                     onChange={(e) =>
-                      setWordForm({ ...wordForm, translated_count: e.target.value })
+                      setWordForm({
+                        ...wordForm,
+                        translated_count: e.target.value,
+                      })
                     }
                     className="w-full px-4 py-3 rounded-2xl bg-slate-50 border border-slate-200 text-sm font-bold text-slate-800 focus:outline-none focus:border-indigo-500 focus:bg-white transition-all"
                   />
@@ -732,7 +779,11 @@ export default function MyProfilePage() {
                   disabled={savingWord}
                   className="px-6 py-2.5 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white font-black text-sm shadow-lg shadow-indigo-200 transition-all cursor-pointer disabled:opacity-50"
                 >
-                  {savingWord ? "Đang lưu..." : editingWord ? "Lưu thay đổi" : "Thêm vào kho"}
+                  {savingWord
+                    ? "Đang lưu..."
+                    : editingWord
+                      ? "Lưu thay đổi"
+                      : "Thêm vào kho"}
                 </button>
               </div>
             </form>
