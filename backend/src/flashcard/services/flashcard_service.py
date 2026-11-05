@@ -1,7 +1,7 @@
 import asyncio
 import uuid
 from datetime import datetime, timezone
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Union
 from fastapi import HTTPException
 from loguru import logger
 
@@ -493,11 +493,11 @@ class FlashcardService:
     async def start_session_by_box(
         self,
         set_id: str,
-        box_number: int,
+        box_number: Union[int, List[int]],
         user_id: str,
     ) -> FlashcardSessionStartResponse:
         """
-        Bắt đầu phiên luyện tập flashcard chỉ với các từ trong một Leitner Box cụ thể.
+        Bắt đầu phiên luyện tập flashcard chỉ với các từ trong một hoặc nhiều Leitner Box cụ thể.
         Tuân thủ theo nguyên lý Spaced Repetition và các quy tắc bài tập tại system-design/flashcard.md.
         """
         card_set = await self.get_set_by_id(set_id, user_id=user_id)
@@ -533,10 +533,12 @@ class FlashcardService:
             supabase_client=self.repo.supabase
         )
 
+        box_label = ", ".join(str(b) for b in box_number) if isinstance(box_number, list) else str(box_number)
+
         if not cards:
             raise HTTPException(
                 status_code=400,
-                detail=f"Box {box_number} hiện chưa có từ vựng nào để luyện tập. Hãy luyện tập bộ thẻ để tăng tiến độ các từ vào Box {box_number}."
+                detail=f"Box {box_label} hiện chưa có từ vựng nào để luyện tập. Hãy luyện tập bộ thẻ để tăng tiến độ các từ vào Box {box_label}."
             )
 
         # 3. Ghi nhận từ vựng background
@@ -560,8 +562,8 @@ class FlashcardService:
         return FlashcardSessionStartResponse(
             session_id=session_id,
             id=set_id,
-            title=f"{card_set.get('title', 'Bộ Thẻ')} (Box {box_number})",
-            description=f"Phiên luyện tập Leitner Box {box_number} ({len(cards)} từ vựng)",
+            title=f"{card_set.get('title', 'Bộ Thẻ')} (Box {box_label})",
+            description=f"Phiên luyện tập Leitner Box {box_label} ({len(cards)} từ vựng)",
             is_public=card_set.get("is_public", True),
             is_dynamic=True,
             all_mastered=False,
@@ -946,6 +948,28 @@ class FlashcardService:
             boxes=boxes,
             loops=loop_items
         )
+
+    async def get_system_repetition_config(self) -> Dict[str, Any]:
+        """Lấy cấu hình các box, kèm theo thống kê toàn hệ thống và các hàng đợi chuyển giao dành cho Admin."""
+        loops = await self.repo.get_repetition_loops()
+        boxes = [int(l["day_repetition"]) for l in loops]
+        loop_items = [
+            RepetitionLoopItem(
+                id=l.get("id"),
+                loop_order=l["loop_order"],
+                day_repetition=l["day_repetition"],
+                pre_loop_id=l.get("pre_loop_id"),
+                next_loop_id=l.get("next_loop_id"),
+            )
+            for l in loops
+        ]
+        system_stats = await self.repo.get_system_leitner_stats()
+        return {
+            "total_boxes": len(boxes),
+            "boxes": boxes,
+            "loops": [item.model_dump() for item in loop_items],
+            "system_stats": system_stats
+        }
 
     async def update_repetition_config(self, req: UpdateRepetitionScheduleRequest) -> RepetitionScheduleResponse:
         """Cập nhật các khoảng cách ngày ôn tập tương ứng với các box trong database."""

@@ -28,6 +28,7 @@ import UserManagement from "@/pages/admin/UserManagement";
 import DictionaryManagement from "@/pages/admin/DictionaryManagement";
 import FlashcardManagement from "@/pages/admin/FlashcardManagement";
 import FlashcardEditor from "@/pages/admin/FlashcardEditor";
+import LeitnerBoxManagement from "@/pages/admin/LeitnerBoxManagement";
 import AdminErrorPage from "@/pages/admin/AdminErrorPage";
 
 export default function App() {
@@ -124,6 +125,7 @@ export default function App() {
           <Route path="flashcards" element={<FlashcardManagement />} />
           <Route path="flashcards/new" element={<FlashcardEditor />} />
           <Route path="flashcards/edit/:id" element={<FlashcardEditor />} />
+          <Route path="leitner-boxes" element={<LeitnerBoxManagement />} />
           <Route path="403" element={<AdminErrorPage code={403} />} />
           <Route path="500" element={<AdminErrorPage code={500} />} />
           <Route path="*" element={<AdminErrorPage code={404} />} />

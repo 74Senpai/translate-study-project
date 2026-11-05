@@ -19,7 +19,7 @@ from src.flashcard.models.flashcard_models import (
     UpdateRepetitionScheduleRequest,
 )
 from src.flashcard.services.flashcard_service import FlashcardService
-from src.middleware.auth import get_current_user, get_optional_current_user
+from src.middleware.auth import get_current_user, get_optional_current_user, require_admin
 
 router = APIRouter(prefix="/flashcards", tags=["flashcards"])
 service = FlashcardService()
@@ -51,9 +51,9 @@ async def get_repetition_config():
 @router.put("/repetition-config", response_model=RepetitionScheduleResponse)
 async def update_repetition_config(
     data: UpdateRepetitionScheduleRequest,
-    user: Optional[dict] = Depends(get_optional_current_user)
+    admin: dict = Depends(require_admin)
 ):
-    """Điều chỉnh lại cấu hình khoảng cách ngày ôn tập (day_repetition) của các box trong database."""
+    """Điều chỉnh lại cấu hình khoảng cách ngày ôn tập (day_repetition) của các box trong database - Chỉ Admin."""
     return await service.update_repetition_config(data)
 
 
@@ -157,12 +157,19 @@ async def get_flashcard_usage(
 async def start_authenticated_session(
     set_id: str,
     box: Optional[int] = None,
+    boxes: Optional[str] = None,
     user: dict = Depends(get_current_user)
 ):
-    """Bắt đầu phiên học dành cho người dùng đã đăng nhập (hỗ trợ lọc theo box)."""
+    """Bắt đầu phiên học dành cho người dùng đã đăng nhập (hỗ trợ chọn ôn tập theo mặc định, theo 1 box hoặc nhiều box)."""
     user_id = user.get("sub") or user.get("id")
     if box is not None and box > 0:
         return await service.start_session_by_box(set_id, box_number=box, user_id=user_id)
+    if boxes:
+        box_list = [int(b.strip()) for b in boxes.split(",") if b.strip().isdigit() and int(b.strip()) > 0]
+        if box_list:
+            if len(box_list) == 1:
+                return await service.start_session_by_box(set_id, box_number=box_list[0], user_id=user_id)
+            return await service.start_session_by_box(set_id, box_number=box_list, user_id=user_id)
     return await service.start_session(set_id, user_id=user_id, is_guest=False)
 
 

@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Layers, Plus, Edit2, Trash2 } from "lucide-react";
+import { Layers, Plus, Edit2, Trash2, Boxes } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { useNotify } from "@/hooks/useNotify";
@@ -64,13 +64,23 @@ export default function FlashcardManagement() {
           </div>
         </div>
 
-        <button
-          onClick={() => navigate("/admin/flashcards/new")}
-          className="flex items-center justify-center gap-2 px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-xl transition-all shadow-lg shadow-indigo-200 active:scale-95 border-none cursor-pointer"
-        >
-          <Plus className="w-4 h-4" />
-          <span>New Set</span>
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => navigate("/admin/leitner-boxes")}
+            className="flex items-center justify-center gap-2 px-5 py-3 bg-white hover:bg-slate-50 text-indigo-700 text-sm font-bold rounded-xl transition-all border border-indigo-200 cursor-pointer shadow-xs active:scale-95"
+          >
+            <Boxes className="w-4 h-4 text-indigo-600" />
+            <span>Cài đặt Box Ghi Nhớ (SRS)</span>
+          </button>
+
+          <button
+            onClick={() => navigate("/admin/flashcards/new")}
+            className="flex items-center justify-center gap-2 px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-xl transition-all shadow-lg shadow-indigo-200 active:scale-95 border-none cursor-pointer"
+          >
+            <Plus className="w-4 h-4" />
+            <span>New Set</span>
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">

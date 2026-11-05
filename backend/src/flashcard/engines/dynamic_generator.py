@@ -2,7 +2,7 @@ import asyncio
 import random
 import uuid
 from datetime import datetime, timezone
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Union
 from loguru import logger
 from src.flashcard.models.flashcard_models import (
     FlashcardCard,
@@ -626,12 +626,12 @@ class DynamicGenerator:
     async def generate_user_dynamic_cards_for_box(
         cls,
         user_id: str,
-        box_number: int,
+        box_number: Union[int, List[int]],
         settings: "FlashcardSettings",
         supabase_client: Any
     ) -> List["FlashcardCard"]:
         """
-        Tạo danh sách cards động chỉ từ các từ trong một Leitner Box cụ thể của user.
+        Tạo danh sách cards động chỉ từ các từ trong một hoặc nhiều Leitner Box cụ thể của user.
         Box number là current_repetition_id trong user_sense_progress.
         """
         total_cards = settings.total_cards or 20
@@ -641,10 +641,17 @@ class DynamicGenerator:
         words_in_box = []
         if supabase_client:
             try:
-                # Find sense_ids where current_repetition_id == box_number for this user
-                prog_res = supabase_client.table("user_sense_progress").select(
+                base_query = supabase_client.table("user_sense_progress").select(
                     "sense_id, mastery_score, current_repetition_id, next_review, wrong_count"
-                ).eq("user_id", user_id).eq("current_repetition_id", box_number).limit(200).execute()
+                ).eq("user_id", user_id)
+
+                if isinstance(box_number, list):
+                    if hasattr(base_query, "in_"):
+                        prog_res = base_query.in_("current_repetition_id", box_number).limit(200).execute()
+                    else:
+                        prog_res = base_query.execute()
+                else:
+                    prog_res = base_query.eq("current_repetition_id", box_number).limit(200).execute()
 
                 if prog_res and prog_res.data:
                     sense_ids = [p["sense_id"] for p in prog_res.data]

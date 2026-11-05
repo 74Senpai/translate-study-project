@@ -719,45 +719,273 @@ class FlashcardRepository:
 
     async def get_user_leitner_box_stats(self, user_id: str) -> Dict[str, Any]:
         """
-        Thống kê các Leitner box và số lượng từ trong mỗi box của user.
-        Bao gồm cả danh sách các box đã cấu hình trong hệ thống (repetition_loops).
+        Thống kê các Leitner box, số lượng từ trong mỗi box, và các hàng đợi chuyển giao giữa các box.
+        - Box K: Số từ đã đến hạn ôn tập trong Box K (sẵn sàng ôn tập).
+        - Hàng đợi (Queue) giữa Box K và Box K+1: Số từ đã vượt qua Box K, đang trong quá trình chuyển giao
+          chờ đến hạn ôn tập (next_review) để bước vào Box K+1.
+        - Bảo mật quy trình học: KHÔNG trả về danh sách chi tiết từ trong hàng đợi để tránh học trước khi làm.
         """
         loops = await self.get_repetition_loops()
         configured_boxes = {l.get("loop_order", idx + 1): l.get("day_repetition", 1) for idx, l in enumerate(loops)}
+        loop_id_to_order = {l.get("id"): l.get("loop_order", idx + 1) for idx, l in enumerate(loops) if l.get("id")}
         if not configured_boxes:
             configured_boxes = {1: 1, 2: 2, 3: 5, 4: 8, 5: 14}
 
-        box_counts: Dict[str, int] = {str(box): 0 for box in configured_boxes.keys()}
+        sorted_box_nums = sorted(configured_boxes.keys())
+        now = datetime.now(timezone.utc)
+
+        # Cấu trúc thống kê theo Box
+        box_stats: Dict[int, Dict[str, Any]] = {
+            b: {
+                "box": b,
+                "day_repetition": configured_boxes[b],
+                "total_count": 0,
+                "ready_count": 0,
+                "in_queue_count": 0,
+            }
+            for b in sorted_box_nums
+        }
+
+        # Cấu trúc các hàng đợi chuyển giao giữa các Box liên tiếp
+        queues = []
+        queue_map = {}
+        for i in range(len(sorted_box_nums) - 1):
+            from_b = sorted_box_nums[i]
+            to_b = sorted_box_nums[i + 1]
+            q_id = f"q_{from_b}_{to_b}"
+            q_obj = {
+                "id": q_id,
+                "from_box": from_b,
+                "to_box": to_b,
+                "interval_days": configured_boxes.get(to_b, 1),
+                "count": 0,
+            }
+            queues.append(q_obj)
+            queue_map[to_b] = q_obj
+
+        # Hàng đợi làm mới / cooldown cho Box 1
+        box1_cooldown_queue = {
+            "id": "q_cooldown_1",
+            "from_box": 0,
+            "to_box": 1,
+            "interval_days": configured_boxes.get(1, 1),
+            "count": 0,
+        }
+
         total_words = 0
 
         if self.supabase and user_id:
             try:
                 res = self.supabase.table("user_sense_progress").select(
-                    "current_repetition_id"
+                    "id, sense_id, current_repetition_id, last_review, next_review"
                 ).eq("user_id", user_id).execute()
 
                 if res and res.data:
-                    for row in res.data:
-                        box_num = row.get("current_repetition_id") or 1
-                        box_key = str(box_num)
-                        box_counts[box_key] = box_counts.get(box_key, 0) + 1
+                    progress_items = res.data
+
+                    for row in progress_items:
+                        raw_rep_id = row.get("current_repetition_id") or 1
+                        box_num = loop_id_to_order.get(raw_rep_id, raw_rep_id)
+                        if box_num not in box_stats:
+                            box_num = sorted_box_nums[-1] if sorted_box_nums else 1
+
                         total_words += 1
+                        box_stats[box_num]["total_count"] += 1
+
+                        next_review_str = row.get("next_review")
+                        is_due = True
+
+                        if next_review_str:
+                            try:
+                                clean_dt_str = str(next_review_str).replace("Z", "+00:00")
+                                nr_dt = datetime.fromisoformat(clean_dt_str)
+                                if nr_dt.tzinfo is None:
+                                    nr_dt = nr_dt.replace(tzinfo=timezone.utc)
+                                if (nr_dt - now).total_seconds() > 0:
+                                    is_due = False
+                            except Exception:
+                                is_due = True
+
+                        if is_due:
+                            box_stats[box_num]["ready_count"] += 1
+                        else:
+                            box_stats[box_num]["in_queue_count"] += 1
+                            if box_num in queue_map:
+                                queue_map[box_num]["count"] += 1
+                            elif box_num == 1:
+                                box1_cooldown_queue["count"] += 1
+
             except Exception as e:
                 logger.debug(f"get_user_leitner_box_stats notice: {e}")
 
+        # Thêm cooldown queue nếu có từ
+        final_queues = []
+        if box1_cooldown_queue["count"] > 0:
+            final_queues.append(box1_cooldown_queue)
+        final_queues.extend(queues)
+
+        box_counts = {str(b): box_stats[b]["total_count"] for b in sorted_box_nums}
+        box_ready_counts = {str(b): box_stats[b]["ready_count"] for b in sorted_box_nums}
+
         box_details = []
-        for box_num, day_rep in sorted(configured_boxes.items()):
-            b_key = str(box_num)
+        for b in sorted_box_nums:
+            bs = box_stats[b]
             box_details.append({
-                "box": box_num,
-                "day_repetition": day_rep,
-                "count": box_counts.get(b_key, 0)
+                "box": b,
+                "day_repetition": bs["day_repetition"],
+                "count": bs["total_count"],
+                "ready_count": bs["ready_count"],
+                "in_queue_count": bs["in_queue_count"],
             })
 
         return {
             "total_words": total_words,
             "boxes": box_counts,
-            "box_details": box_details
+            "ready_boxes": box_ready_counts,
+            "box_details": box_details,
+            "queues": final_queues
+        }
+
+    async def get_system_leitner_stats(self) -> Dict[str, Any]:
+        """
+        Thống kê Spaced Repetition toàn hệ thống dành cho Admin:
+        - Số lượng từ và trạng thái trong từng Box
+        - Các hàng đợi chuyển giao giữa các Box trên toàn hệ thống
+        - Danh sách các từ đang chuyển giao gần nhất
+        """
+        loops = await self.get_repetition_loops()
+        configured_boxes = {l.get("loop_order", idx + 1): l.get("day_repetition", 1) for idx, l in enumerate(loops)}
+        loop_id_to_order = {l.get("id"): l.get("loop_order", idx + 1) for idx, l in enumerate(loops) if l.get("id")}
+        if not configured_boxes:
+            configured_boxes = {1: 1, 2: 2, 3: 5, 4: 8, 5: 14}
+
+        sorted_box_nums = sorted(configured_boxes.keys())
+        now = datetime.now(timezone.utc)
+
+        box_stats = {
+            b: {
+                "box": b,
+                "day_repetition": configured_boxes[b],
+                "total_count": 0,
+                "ready_count": 0,
+                "in_queue_count": 0
+            }
+            for b in sorted_box_nums
+        }
+
+        queues = []
+        queue_map = {}
+        for i in range(len(sorted_box_nums) - 1):
+            from_b = sorted_box_nums[i]
+            to_b = sorted_box_nums[i + 1]
+            q_id = f"q_{from_b}_{to_b}"
+            q_obj = {
+                "id": q_id,
+                "from_box": from_b,
+                "to_box": to_b,
+                "interval_days": configured_boxes.get(to_b, 1),
+                "count": 0,
+                "words": []
+            }
+            queues.append(q_obj)
+            queue_map[to_b] = q_obj
+
+        total_system_words = 0
+        recent_transitions = []
+
+        if self.supabase:
+            try:
+                res = self.supabase.table("user_sense_progress").select(
+                    "id, sense_id, mastery_score, current_repetition_id, last_review, next_review"
+                ).limit(500).execute()
+
+                if res and res.data:
+                    progress_items = res.data
+                    sense_ids = [p["sense_id"] for p in progress_items if p.get("sense_id")]
+
+                    senses_map = {}
+                    word_ids = []
+                    if sense_ids:
+                        for chunk in [sense_ids[i:i + 100] for i in range(0, min(len(sense_ids), 300), 100)]:
+                            try:
+                                s_res = self.supabase.table("senses").select("id, word_id, meaning_vi").in_("id", chunk).execute()
+                                if s_res and s_res.data:
+                                    for s in s_res.data:
+                                        senses_map[s["id"]] = s
+                                        if s.get("word_id"):
+                                            word_ids.append(s["word_id"])
+                            except Exception:
+                                pass
+
+                    words_map = {}
+                    if word_ids:
+                        unique_wids = list(set(word_ids))
+                        for chunk in [unique_wids[i:i + 100] for i in range(0, min(len(unique_wids), 300), 100)]:
+                            try:
+                                w_res = self.supabase.table("words").select("id, word_text").in_("id", chunk).execute()
+                                if w_res and w_res.data:
+                                    for w in w_res.data:
+                                        words_map[w["id"]] = w.get("word_text")
+                            except Exception:
+                                pass
+
+                    for row in progress_items:
+                        raw_rep_id = row.get("current_repetition_id") or 1
+                        box_num = loop_id_to_order.get(raw_rep_id, raw_rep_id)
+                        if box_num not in box_stats:
+                            box_num = sorted_box_nums[-1] if sorted_box_nums else 1
+
+                        total_system_words += 1
+                        box_stats[box_num]["total_count"] += 1
+
+                        next_review_str = row.get("next_review")
+                        is_due = True
+                        seconds_left = 0.0
+
+                        if next_review_str:
+                            try:
+                                clean_dt_str = str(next_review_str).replace("Z", "+00:00")
+                                nr_dt = datetime.fromisoformat(clean_dt_str)
+                                if nr_dt.tzinfo is None:
+                                    nr_dt = nr_dt.replace(tzinfo=timezone.utc)
+                                seconds_left = (nr_dt - now).total_seconds()
+                                if seconds_left > 0:
+                                    is_due = False
+                            except Exception:
+                                is_due = True
+
+                        sense_id = row.get("sense_id")
+                        sense_info = senses_map.get(sense_id, {})
+                        word_text = words_map.get(sense_info.get("word_id"), "") or "Vocabulary"
+                        meaning_vi = sense_info.get("meaning_vi") or ""
+
+                        if is_due:
+                            box_stats[box_num]["ready_count"] += 1
+                        else:
+                            box_stats[box_num]["in_queue_count"] += 1
+                            item_data = {
+                                "word": word_text,
+                                "meaning": meaning_vi,
+                                "from_box": box_num - 1 if box_num > 1 else 1,
+                                "to_box": box_num,
+                                "next_review": next_review_str,
+                                "seconds_left": max(0, int(seconds_left)),
+                            }
+                            if box_num in queue_map:
+                                queue_map[box_num]["count"] += 1
+                                if len(queue_map[box_num]["words"]) < 20:
+                                    queue_map[box_num]["words"].append(item_data)
+                            if len(recent_transitions) < 25:
+                                recent_transitions.append(item_data)
+
+            except Exception as e:
+                logger.debug(f"get_system_leitner_stats notice: {e}")
+
+        return {
+            "total_system_words": total_system_words,
+            "boxes": box_stats,
+            "queues": queues,
+            "recent_transitions": recent_transitions
         }
 
     async def update_user_word_proficiency(

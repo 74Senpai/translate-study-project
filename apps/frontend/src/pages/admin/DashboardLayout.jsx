@@ -10,6 +10,7 @@ import {
   Layers,
   GraduationCap,
   ArrowLeft,
+  Boxes,
 } from "lucide-react";
 
 const SidebarLink = ({ to, children, icon: Icon, end = false }) => {
@@ -82,6 +83,12 @@ export default function DashboardLayout() {
           <SidebarLink to="/admin/flashcards" icon={Layers}>
             Flashcards
           </SidebarLink>
+
+          {isAdmin && (
+            <SidebarLink to="/admin/leitner-boxes" icon={Boxes}>
+              Box Ghi Nhớ (SRS)
+            </SidebarLink>
+          )}
 
           {isCreator && (
             <SidebarLink to="/admin/skills" icon={GraduationCap}>

@@ -106,3 +106,48 @@ async def admin_cleanup_sessions(admin=Depends(require_admin)):
     service = FlashcardService()
     return await service.cleanup_old_sessions()
 
+
+@router.get("/repetition-config")
+async def get_admin_repetition_config(admin=Depends(require_admin)):
+    """
+    Lấy danh sách cấu hình các Box ghi nhớ Leitner và thống kê hàng đợi chuyển giao toàn hệ thống.
+    Chỉ Admin mới có quyền truy cập.
+    """
+    from src.flashcard.services.flashcard_service import FlashcardService
+    service = FlashcardService()
+    return await service.get_system_repetition_config()
+
+
+@router.put("/repetition-config")
+async def update_admin_repetition_config(
+    data: Dict[str, Any],
+    admin=Depends(require_admin)
+):
+    """
+    Cập nhật cài đặt các Box ghi nhớ Leitner cho toàn bộ hệ thống.
+    Chỉ Admin mới có quyền thay đổi.
+    """
+    from src.flashcard.services.flashcard_service import FlashcardService
+    from src.flashcard.models.flashcard_models import UpdateRepetitionScheduleRequest
+
+    raw_boxes = data.get("boxes", [])
+    if not raw_boxes or not isinstance(raw_boxes, list):
+        raise HTTPException(status_code=400, detail="Danh sách boxes không hợp lệ.")
+
+    try:
+        clean_boxes = [int(b) for b in raw_boxes]
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="Giá trị ngày của các box phải là số nguyên.")
+
+    service = FlashcardService()
+    req = UpdateRepetitionScheduleRequest(boxes=clean_boxes)
+    updated = await service.update_repetition_config(req)
+    system_stats = await service.repo.get_system_leitner_stats()
+    return {
+        "message": "Cấu hình Box ghi nhớ đã được cập nhật thành công cho toàn hệ thống.",
+        "total_boxes": updated.total_boxes,
+        "boxes": updated.boxes,
+        "loops": [l.model_dump() for l in updated.loops],
+        "system_stats": system_stats
+    }
+
