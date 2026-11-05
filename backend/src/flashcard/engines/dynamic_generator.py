@@ -1,3 +1,4 @@
+import asyncio
 import random
 import uuid
 from datetime import datetime, timezone
@@ -299,15 +300,32 @@ class DynamicGenerator:
         words_data: List[Dict[str, Any]] = []
         now_iso = datetime.now(timezone.utc).isoformat()
 
-        # 1. Truy vấn từ Supabase user_words + senses
+        # 1 & 2. Truy vấn đồng thời user_words + user_word_statistics
         if supabase_client:
-            try:
-                query = supabase_client.table("user_words").select(
+            def _query_user_words(supabase, uid):
+                return supabase.table("user_words").select(
                     "word_id, translated_count, words(id, word_text)"
-                ).eq("user_id", user_id).limit(150).execute()
+                ).eq("user_id", uid).limit(150).execute()
 
-                if query.data:
-                    for row in query.data:
+            def _query_user_stats(supabase, uid):
+                return supabase.table("user_word_statistics").select(
+                    "word, encountered_count, translated_count, total_count"
+                ).eq("user_id", uid).limit(150).execute()
+
+            try:
+                user_words_result, stats_result = await asyncio.gather(
+                    asyncio.to_thread(_query_user_words, supabase_client, user_id),
+                    asyncio.to_thread(_query_user_stats, supabase_client, user_id),
+                )
+            except Exception as e:
+                logger.warning(f"Error running concurrent queries: {e}")
+                user_words_result = None
+                stats_result = None
+
+            # Process user_words result
+            try:
+                if user_words_result and user_words_result.data:
+                    for row in user_words_result.data:
                         word_obj = row.get("words") or {}
                         word_text = word_obj.get("word_text")
                         if word_text:
@@ -319,18 +337,15 @@ class DynamicGenerator:
                                 "next_review": None,
                             })
             except Exception as e:
-                logger.warning(f"Error querying user_words from Supabase: {e}")
+                logger.warning(f"Error processing user_words result: {e}")
 
-        # 2. Truy vấn user_word_statistics để bổ sung encountered_count
-        if supabase_client:
+            # Process user_word_statistics result
             try:
-                stat_query = supabase_client.table("user_word_statistics").select(
-                    "word, encountered_count, translated_count, total_count"
-                ).eq("user_id", user_id).limit(150).execute()
-
-                if stat_query.data:
-                    for s in stat_query.data:
+                if stats_result and stats_result.data:
+                    for s in stats_result.data:
                         w = s.get("word")
+                        if not w:
+                            continue
                         found = next((item for item in words_data if item["word"].lower() == w.lower()), None)
                         if found:
                             found["encountered_count"] = max(found.get("encountered_count", 0), s.get("encountered_count", 0))
@@ -344,7 +359,7 @@ class DynamicGenerator:
                                 "next_review": None,
                             })
             except Exception as e:
-                logger.debug(f"Error querying user_word_statistics: {e}")
+                logger.debug(f"Error processing user_word_statistics result: {e}")
 
         # 3. Batch query: Lấy senses & word_id nhanh chóng cho toàn bộ từ
         # 3.1 Tìm word_id còn thiếu
@@ -354,10 +369,17 @@ class DynamicGenerator:
             try:
                 for i in range(0, len(missing_texts), 50):
                     chunk = missing_texts[i:i + 50]
-                    w_res = supabase_client.table("words").select("id, word_text").in_("word_text", chunk).execute()
+                    query = supabase_client.table("words").select("id, word_text")
+                    if hasattr(query, "in_"):
+                        w_res = query.in_("word_text", chunk).execute()
+                    else:
+                        w_res = query.execute()
                     if w_res and w_res.data:
                         for row in w_res.data:
-                            word_id_map[row["word_text"].lower()] = row["id"]
+                            wtxt = row.get("word_text", "").lower()
+                            if not hasattr(query, "in_") and wtxt not in chunk:
+                                continue
+                            word_id_map[wtxt] = row["id"]
             except Exception as e:
                 logger.debug(f"Batch fetch words error: {e}")
 
@@ -373,12 +395,18 @@ class DynamicGenerator:
             try:
                 for i in range(0, len(all_word_ids), 50):
                     chunk = all_word_ids[i:i + 50]
-                    s_res = supabase_client.table("senses").select(
+                    query = supabase_client.table("senses").select(
                         "id, word_id, meaning_vi, ipa, definition_en, definition_vi, example_en"
-                    ).in_("word_id", chunk).execute()
+                    )
+                    if hasattr(query, "in_"):
+                        s_res = query.in_("word_id", chunk).execute()
+                    else:
+                        s_res = query.execute()
                     if s_res and s_res.data:
                         for s in s_res.data:
                             wid = s.get("word_id")
+                            if not hasattr(query, "in_") and wid not in chunk:
+                                continue
                             if wid not in senses_by_word_id:
                                 senses_by_word_id[wid] = []
                             senses_by_word_id[wid].append(s)
@@ -402,12 +430,19 @@ class DynamicGenerator:
             try:
                 for i in range(0, len(all_sense_ids), 50):
                     chunk = all_sense_ids[i:i + 50]
-                    p_res = supabase_client.table("user_sense_progress").select(
+                    query = supabase_client.table("user_sense_progress").select(
                         "sense_id, mastery_score, current_repetition_id, next_review, wrong_count"
-                    ).eq("user_id", user_id).in_("sense_id", chunk).execute()
+                    ).eq("user_id", user_id)
+                    if hasattr(query, "in_"):
+                        p_res = query.in_("sense_id", chunk).execute()
+                    else:
+                        p_res = query.execute()
                     if p_res and p_res.data:
                         for p in p_res.data:
-                            progress_by_sense_id[p["sense_id"]] = p
+                            sid = p.get("sense_id")
+                            if not hasattr(query, "in_") and sid not in chunk:
+                                continue
+                            progress_by_sense_id[sid] = p
             except Exception as e:
                 logger.debug(f"Batch fetch progress error: {e}")
 
@@ -490,7 +525,11 @@ class DynamicGenerator:
         # Nếu danh sách distractors ít hơn 6, lấy thêm từ senses hệ thống để trắc nghiệm luôn đủ 4 đáp án
         if len(available_meanings) < 6 and supabase_client:
             try:
-                extra_res = supabase_client.table("senses").select("meaning_vi").not_.is_("meaning_vi", "null").limit(50).execute()
+                query = supabase_client.table("senses").select("meaning_vi")
+                if hasattr(query, "not_"):
+                    extra_res = query.not_.is_("meaning_vi", "null").limit(50).execute()
+                else:
+                    extra_res = query.limit(50).execute()
                 if extra_res and extra_res.data:
                     for row in extra_res.data:
                         m_txt = str(row.get("meaning_vi") or "").strip()
@@ -580,6 +619,179 @@ class DynamicGenerator:
                             break
             except Exception as e:
                 logger.warning(f"Error supplementing system cards: {e}")
+
+        return cards
+
+    @classmethod
+    async def generate_user_dynamic_cards_for_box(
+        cls,
+        user_id: str,
+        box_number: int,
+        settings: "FlashcardSettings",
+        supabase_client: Any
+    ) -> List["FlashcardCard"]:
+        """
+        Tạo danh sách cards động chỉ từ các từ trong một Leitner Box cụ thể của user.
+        Box number là current_repetition_id trong user_sense_progress.
+        """
+        total_cards = settings.total_cards or 20
+        allowed_types = settings.allowed_task_types or ["choice", "fill", "complete"]
+
+        # Get all sense_ids for words in the requested box
+        words_in_box = []
+        if supabase_client:
+            try:
+                # Find sense_ids where current_repetition_id == box_number for this user
+                prog_res = supabase_client.table("user_sense_progress").select(
+                    "sense_id, mastery_score, current_repetition_id, next_review, wrong_count"
+                ).eq("user_id", user_id).eq("current_repetition_id", box_number).limit(200).execute()
+
+                if prog_res and prog_res.data:
+                    sense_ids = [p["sense_id"] for p in prog_res.data]
+                    progress_map = {p["sense_id"]: p for p in prog_res.data}
+
+                    # Fetch senses for these sense_ids
+                    s_query = supabase_client.table("senses").select(
+                        "id, word_id, meaning_vi, ipa, definition_en, definition_vi, example_en"
+                    )
+                    if hasattr(s_query, "in_"):
+                        senses_res = s_query.in_("id", sense_ids).execute()
+                    else:
+                        senses_res = s_query.execute()
+
+                    if senses_res and senses_res.data:
+                        raw_senses = [s for s in senses_res.data if (hasattr(s_query, "in_") or s.get("id") in sense_ids)]
+                        word_ids = [s["word_id"] for s in raw_senses if s.get("word_id")]
+
+                        # Fetch word texts
+                        w_query = supabase_client.table("words").select("id, word_text")
+                        if hasattr(w_query, "in_"):
+                            words_res = w_query.in_("id", word_ids).execute()
+                        else:
+                            words_res = w_query.execute()
+                        word_text_map = {}
+                        if words_res and words_res.data:
+                            word_text_map = {w["id"]: w["word_text"] for w in words_res.data if (hasattr(w_query, "in_") or w.get("id") in word_ids)}
+
+                        # Fetch user statistics for context
+                        stat_res = supabase_client.table("user_word_statistics").select(
+                            "word, encountered_count, translated_count"
+                        ).eq("user_id", user_id).execute()
+                        stat_map = {}
+                        if stat_res and stat_res.data:
+                            stat_map = {s["word"].lower(): s for s in stat_res.data}
+
+                        for sense in raw_senses:
+                            sense_id = sense["id"]
+                            word_id = sense.get("word_id")
+                            word_text = word_text_map.get(word_id, "")
+                            if not word_text or not str(sense.get("meaning_vi") or "").strip():
+                                continue
+
+                            prog = progress_map.get(sense_id, {})
+                            stat = stat_map.get(word_text.lower(), {})
+
+                            words_in_box.append({
+                                "word": word_text,
+                                "sense": sense,
+                                "sense_id": sense_id,
+                                "proficiency": prog.get("mastery_score", 0.0),
+                                "leitner_box": prog.get("current_repetition_id", 1),
+                                "next_review": prog.get("next_review"),
+                                "encountered_count": stat.get("encountered_count", 0),
+                                "translated_count": stat.get("translated_count", 0),
+                                "attempts": stat.get("encountered_count", 0) + stat.get("translated_count", 0),
+                            })
+            except Exception as e:
+                logger.warning(f"Error querying box {box_number} words: {e}")
+
+        if not words_in_box:
+            return []
+
+        # Build distractors pool
+        available_meanings = list(dict.fromkeys(
+            str(item["sense"].get("meaning_vi") or "").strip()
+            for item in words_in_box
+            if str(item["sense"].get("meaning_vi") or "").strip()
+        ))
+
+        # Supplement distractors if needed
+        if len(available_meanings) < 6 and supabase_client:
+            try:
+                query = supabase_client.table("senses").select("meaning_vi")
+                if hasattr(query, "not_"):
+                    extra_res = query.not_.is_("meaning_vi", "null").limit(50).execute()
+                else:
+                    extra_res = query.limit(50).execute()
+                if extra_res and extra_res.data:
+                    for row in extra_res.data:
+                        m_txt = str(row.get("meaning_vi") or "").strip()
+                        if m_txt and m_txt not in available_meanings:
+                            available_meanings.append(m_txt)
+            except Exception:
+                pass
+
+        random.shuffle(words_in_box)
+        selected = words_in_box[:total_cards]
+
+        cards = []
+        for item in selected:
+            word_str = item["word"]
+            s_data = item["sense"]
+            meaning = str(s_data.get("meaning_vi") or "").strip()
+            sense_id = item["sense_id"]
+            prof = item.get("proficiency", 0.0)
+            context_str = s_data.get("example_en")
+            def_en = s_data.get("definition_en")
+            def_vi = s_data.get("definition_vi")
+
+            distractors = [m for m in available_meanings if m.casefold() != meaning.casefold()]
+
+            selected_task = cls._select_task_type(
+                proficiency=prof,
+                allowed_task_types=allowed_types,
+                has_context=bool(context_str and context_str.strip()),
+                has_definition_en=bool(def_en and def_en.strip()),
+            )
+            question_txt = cls._build_question_text(
+                task_type=selected_task,
+                word=word_str,
+                meaning=meaning,
+                context=context_str,
+                definition_en=def_en,
+                definition_vi=def_vi,
+            )
+            tasks = cls._build_card_tasks(
+                word=word_str,
+                meaning=meaning,
+                distractors=distractors,
+                allowed_task_types=allowed_types,
+                proficiency=prof,
+                definition_en=def_en,
+            )
+
+            card = FlashcardCard(
+                id=f"box_{box_number}_{uuid.uuid4().hex[:8]}",
+                word=word_str,
+                meaning=meaning,
+                ipa=s_data.get("ipa"),
+                question="",
+                hint=def_vi or def_en or f"Bắt đầu bằng chữ '{word_str[0]}'",
+                context=context_str,
+                definition_en=def_en,
+                definition_vi=def_vi,
+                difficulty="medium" if prof >= 0 else "easy",
+                timer=settings.per_card_timer or 15,
+                points=10,
+                tasks=tasks,
+                sense_id=sense_id,
+                user_proficiency=prof,
+                user_attempts=item.get("attempts", 0),
+                leitner_box=item.get("leitner_box", box_number),
+                selected_task_type=selected_task,
+                question_text=question_txt,
+            )
+            cards.append(card)
 
         return cards
 

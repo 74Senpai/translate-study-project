@@ -416,14 +416,23 @@ class FlashcardService:
             target_words = [c.word for c in cards if c.word]
             asyncio.create_task(self._record_words_background(user_id, target_words))
 
+            # Batch fetch điểm thông thạo & Leitner box tối ưu tốc độ tải
+            if hasattr(self.repo, "get_batch_user_word_proficiency"):
+                prof_map = await self.repo.get_batch_user_word_proficiency(user_id, target_words)
+            else:
+                prof_map = {}
+                for tw in target_words:
+                    try:
+                        prof_map[tw.strip().lower()] = await self.repo.get_user_word_proficiency(user_id, tw)
+                    except Exception:
+                        pass
+
             for card in cards:
-                try:
-                    prof_data = await self.repo.get_user_word_proficiency(user_id, card.word)
-                    card.user_proficiency = prof_data["proficiency"]
-                    card.user_attempts = prof_data["attempts"]
-                    card.leitner_box = prof_data["leitner_box"]
-                except Exception:
-                    pass
+                clean_w = card.word.strip().lower()
+                prof_data = prof_map.get(clean_w, {})
+                card.user_proficiency = prof_data.get("proficiency", 0.0)
+                card.user_attempts = prof_data.get("attempts", 0)
+                card.leitner_box = prof_data.get("leitner_box", 1)
 
         # Sau khi có proficiency, backend quyết định task type & sinh câu hỏi cho tất cả cards
         # (bao gồm cả manual/AI cards chưa có selected_task_type)
@@ -480,6 +489,90 @@ class FlashcardService:
             cards=cards,
             usage=None
         )
+
+    async def start_session_by_box(
+        self,
+        set_id: str,
+        box_number: int,
+        user_id: str,
+    ) -> FlashcardSessionStartResponse:
+        """
+        Bắt đầu phiên luyện tập flashcard chỉ với các từ trong một Leitner Box cụ thể.
+        Tuân thủ theo nguyên lý Spaced Repetition và các quy tắc bài tập tại system-design/flashcard.md.
+        """
+        card_set = await self.get_set_by_id(set_id, user_id=user_id)
+        settings_dict = card_set.get("settings") or {}
+        settings = FlashcardSettings(**settings_dict)
+
+        # 1. Kiểm tra giới hạn chơi trong ngày và khung giờ
+        usage = await self.repo.get_user_usage(
+            user_id=user_id,
+            set_id=set_id,
+            daily_limit=settings.daily_limit,
+            reset_time_str=settings.reset_time,
+            event_start_at=settings.event_start_at,
+            event_end_at=settings.event_end_at
+        )
+        if not usage["can_play"]:
+            if usage["event_status"] == "not_started":
+                raise HTTPException(status_code=400, detail="Bộ thẻ này chưa tới thời gian mở.")
+            elif usage["event_status"] == "ended":
+                raise HTTPException(status_code=400, detail="Bộ thẻ này đã kết thúc thời gian mở.")
+            else:
+                raise HTTPException(
+                    status_code=429,
+                    detail=f"Bạn đã đạt giới hạn {settings.daily_limit} lượt làm hôm nay. Lượt chơi sẽ làm mới lúc {settings.reset_time}."
+                )
+        await self.repo.increment_usage(user_id=user_id, set_id=set_id, reset_time_str=settings.reset_time)
+
+        # 2. Sinh thẻ bài lọc theo box_number
+        cards = await DynamicGenerator.generate_user_dynamic_cards_for_box(
+            user_id=user_id,
+            box_number=box_number,
+            settings=settings,
+            supabase_client=self.repo.supabase
+        )
+
+        if not cards:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Box {box_number} hiện chưa có từ vựng nào để luyện tập. Hãy luyện tập bộ thẻ để tăng tiến độ các từ vào Box {box_number}."
+            )
+
+        # 3. Ghi nhận từ vựng background
+        target_words = [c.word for c in cards if c.word]
+        asyncio.create_task(self._record_words_background(user_id, target_words))
+
+        # 4. Tạo session
+        session_id = f"sess_{uuid.uuid4().hex}"
+        session_data = {
+            "session_id": session_id,
+            "set_id": set_id,
+            "user_id": user_id,
+            "is_guest": False,
+            "score": 0,
+            "streak": 0,
+            "cards_count": len(cards),
+            "started_at": datetime.now(timezone.utc).isoformat(),
+        }
+        await self.repo.create_session(session_data)
+
+        return FlashcardSessionStartResponse(
+            session_id=session_id,
+            id=set_id,
+            title=f"{card_set.get('title', 'Bộ Thẻ')} (Box {box_number})",
+            description=f"Phiên luyện tập Leitner Box {box_number} ({len(cards)} từ vựng)",
+            is_public=card_set.get("is_public", True),
+            is_dynamic=True,
+            all_mastered=False,
+            settings=settings,
+            cards=cards,
+            usage=None
+        )
+
+    async def get_user_leitner_stats(self, user_id: str) -> Dict[str, Any]:
+        """Thống kê số lượng từ trong mỗi Leitner Box của user."""
+        return await self.repo.get_user_leitner_box_stats(user_id=user_id)
 
     async def _record_words_background(self, user_id: Optional[str], words: List[str]):
         """Ghi nhận từ vựng tiếng Anh trong background."""

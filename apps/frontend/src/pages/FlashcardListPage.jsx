@@ -30,6 +30,7 @@ export default function FlashcardListPage() {
   const [inviteCode, setInviteCode] = useState("");
   const [joining, setJoining] = useState(false);
   const [inviteError, setInviteError] = useState("");
+  const [leitnerStats, setLeitnerStats] = useState(null);
   const navigate = useNavigate();
 
   const fetchSets = async () => {
@@ -43,9 +44,19 @@ export default function FlashcardListPage() {
     }
   };
 
+  const fetchLeitnerStats = async () => {
+    try {
+      const { data } = await axiosInstance.get("/flashcards/user-leitner-stats");
+      setLeitnerStats(data);
+    } catch (err) {
+      // Guest or not logged in, ignore
+    }
+  };
+
   useEffect(() => {
     const timer = setTimeout(() => {
       fetchSets();
+      fetchLeitnerStats();
     }, 0);
     return () => clearTimeout(timer);
   }, []);
@@ -221,6 +232,35 @@ export default function FlashcardListPage() {
                       );
                     })()}
 
+                    {set.set_type === "user_dynamic" && (
+                      <div className="pt-2 border-t border-slate-100">
+                        <div className="flex items-center justify-between text-[11px] font-black text-slate-400 uppercase tracking-wider mb-2">
+                          <span className="flex items-center gap-1 text-indigo-600">
+                            <Layers className="w-3.5 h-3.5" />
+                            Chọn Box luyện tập:
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {[1, 2, 3, 4, 5].map((b) => {
+                            const count = leitnerStats?.boxes?.[String(b)] || 0;
+                            return (
+                              <button
+                                key={b}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  navigate(`/flashcards/play/${set.id}?box=${b}`);
+                                }}
+                                className="px-2 py-1 rounded-xl bg-indigo-50 hover:bg-indigo-600 hover:text-white border border-indigo-100 text-[11px] font-black text-indigo-700 transition-all cursor-pointer shadow-xs active:scale-95"
+                                title={`Ôn tập Box ${b} (${count} từ vựng)`}
+                              >
+                                Box {b}: {count}từ
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
                     <button
                       onClick={async (e) => {
                         e.stopPropagation();
@@ -319,6 +359,45 @@ export default function FlashcardListPage() {
                   </div>
                 </div>
               </div>
+
+              {selectedSet.set_type === "user_dynamic" && (
+                <div className="mb-6 p-5 bg-indigo-50/70 border border-indigo-100 rounded-3xl">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                      <Layers className="w-4 h-4 text-indigo-600" />
+                      <span className="text-xs font-black text-indigo-900 uppercase tracking-wider">
+                        Ôn tập theo từng Leitner Box
+                      </span>
+                    </div>
+                    <span className="text-[11px] font-bold text-indigo-600">
+                      {leitnerStats?.total_words ?? 0} từ đang theo dõi
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-5 gap-2">
+                    {[1, 2, 3, 4, 5].map((b) => {
+                      const count = leitnerStats?.boxes?.[String(b)] || 0;
+                      return (
+                        <button
+                          key={b}
+                          disabled={usageData?.remaining_attempts === 0}
+                          onClick={() => {
+                            setSelectedSet(null);
+                            navigate(`/flashcards/play/${selectedSet.id}?box=${b}`);
+                          }}
+                          className="flex flex-col items-center justify-center p-2.5 bg-white border border-indigo-200/80 rounded-2xl hover:border-indigo-600 hover:bg-indigo-600 hover:text-white transition-all group shadow-xs cursor-pointer active:scale-95 disabled:opacity-50"
+                        >
+                          <span className="text-[11px] font-black group-hover:text-white text-indigo-900">
+                            Box {b}
+                          </span>
+                          <span className="text-[10px] font-bold text-slate-400 group-hover:text-indigo-100">
+                            {count} từ
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
 
               {usageData?.remaining_attempts === 0 && (
                 <div className="mb-8 p-5 bg-rose-50 border border-rose-100 rounded-2xl flex items-start gap-4">

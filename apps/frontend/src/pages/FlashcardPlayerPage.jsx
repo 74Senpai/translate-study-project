@@ -32,7 +32,8 @@ import { speakWord } from "@/utils/speech";
 // Device Detection — used for platform-specific audio strategies
 const _ua = typeof navigator !== "undefined" ? navigator.userAgent : "";
 const isIOSDevice = /iPad|iPhone|iPod/.test(_ua) && !window.MSStream;
-const hasSpeechSupport = typeof window !== 'undefined' && !!window.speechSynthesis;
+const hasSpeechSupport =
+  typeof window !== "undefined" && !!window.speechSynthesis;
 
 // Kiểm tra có voices thực sự không (speech synthesis có thể tồn tại nhưng không có voices)
 const checkHasVoices = () => {
@@ -86,7 +87,7 @@ const getAudioContext = () => {
     _iosKeepAliveInterval = setInterval(() => {
       if (!globalAudioCtx) return;
       if (globalAudioCtx.state === "suspended") {
-        globalAudioCtx.resume().catch(() => { });
+        globalAudioCtx.resume().catch(() => {});
       } else if (globalAudioCtx.state === "running") {
         // Play a silent 1-sample buffer to prevent iOS from sleeping the context
         try {
@@ -522,8 +523,13 @@ export default function FlashcardPlayerPage() {
 
   // Auto-speak in Audio Listening Mode hoặc các task nghe
   useEffect(() => {
-    const isListenTask = activeTaskType === "listen_choice" || activeTaskType === "listen_write";
-    if ((isAudioMode || isListenTask) && gameState === "playing" && set?.cards?.[currentCardIdx]) {
+    const isListenTask =
+      activeTaskType === "listen_choice" || activeTaskType === "listen_write";
+    if (
+      (isAudioMode || isListenTask) &&
+      gameState === "playing" &&
+      set?.cards?.[currentCardIdx]
+    ) {
       const card = set.cards[currentCardIdx];
       const timer = setTimeout(() => {
         playCardAudio(card);
@@ -550,20 +556,27 @@ export default function FlashcardPlayerPage() {
     if (!hasSpeechSupport) return;
     const syncVoices = () => setHasVoices(checkHasVoices());
     // voices có thể load async, nhất là lần đầu
-    window.speechSynthesis.addEventListener('voiceschanged', syncVoices);
+    window.speechSynthesis.addEventListener("voiceschanged", syncVoices);
     syncVoices();
-    return () => window.speechSynthesis.removeEventListener('voiceschanged', syncVoices);
+    return () =>
+      window.speechSynthesis.removeEventListener("voiceschanged", syncVoices);
   }, []);
 
   // Xây dựng pool từ tất cả cards khi bắt đầu session (hoặc khi set thay đổi)
   useEffect(() => {
     if (!set?.cards?.length) return;
-    const viPool = [...new Set(
-      set.cards.map(c => (c.meaning || '').trim()).filter(Boolean)
-    )];
-    const enPool = [...new Set(
-      set.cards.map(c => (c.word || '').trim().toLowerCase()).filter(Boolean)
-    )];
+    const viPool = [
+      ...new Set(
+        set.cards.map((c) => (c.meaning || "").trim()).filter(Boolean),
+      ),
+    ];
+    const enPool = [
+      ...new Set(
+        set.cards
+          .map((c) => (c.word || "").trim().toLowerCase())
+          .filter(Boolean),
+      ),
+    ];
     setSessionPools({ viPool, enPool });
   }, [set]);
 
@@ -576,54 +589,84 @@ export default function FlashcardPlayerPage() {
    * @param {Array} cardsList - danh sách cards đầy đủ phòng khi sessionPools chưa kịp cập nhật state
    * @returns {Array<{text, is_correct}>}
    */
-  const buildDynamicOptions = (card, taskType, answerLang = 'vi', cardsList = null) => {
+  const buildDynamicOptions = (
+    card,
+    taskType,
+    answerLang = "vi",
+    cardsList = null,
+  ) => {
     const cards = cardsList || set?.cards || [];
     const viPool = sessionPools.viPool?.length
       ? sessionPools.viPool
-      : [...new Set(cards.map(c => (c.meaning || '').trim()).filter(Boolean))];
+      : [
+          ...new Set(
+            cards.map((c) => (c.meaning || "").trim()).filter(Boolean),
+          ),
+        ];
     const enPool = sessionPools.enPool?.length
       ? sessionPools.enPool
-      : [...new Set(cards.map(c => (c.word || '').trim().toLowerCase()).filter(Boolean))];
+      : [
+          ...new Set(
+            cards
+              .map((c) => (c.word || "").trim().toLowerCase())
+              .filter(Boolean),
+          ),
+        ];
 
-    if (answerLang === 'en') {
+    if (answerLang === "en") {
       // def_choice: cho định nghĩa → chọn từ EN
-      const correctText = (card.word || '').trim();
+      const correctText = (card.word || "").trim();
       const pool = enPool.filter(
-        w => w.toLowerCase() !== correctText.toLowerCase()
+        (w) => w.toLowerCase() !== correctText.toLowerCase(),
       );
       let distractors;
       if (pool.length >= 3) {
         const shuffled = [...pool].sort(() => Math.random() - 0.5);
-        distractors = shuffled.slice(0, 3).map(d => ({ text: d, is_correct: false }));
+        distractors = shuffled
+          .slice(0, 3)
+          .map((d) => ({ text: d, is_correct: false }));
       } else {
-        const backendOpts = (card.tasks?.def_choice?.options || card.tasks?.choice?.options || []).filter(o => !o.is_correct);
+        const backendOpts = (
+          card.tasks?.def_choice?.options ||
+          card.tasks?.choice?.options ||
+          []
+        ).filter((o) => !o.is_correct);
         if (backendOpts.length > 0) {
-          distractors = backendOpts.map(o => ({ text: o.text, is_correct: false }));
+          distractors = backendOpts.map((o) => ({
+            text: o.text,
+            is_correct: false,
+          }));
         } else {
-          distractors = pool.map(d => ({ text: d, is_correct: false }));
+          distractors = pool.map((d) => ({ text: d, is_correct: false }));
         }
       }
-      const options = [
-        { text: correctText, is_correct: true },
-        ...distractors
-      ];
+      const options = [{ text: correctText, is_correct: true }, ...distractors];
       return options.sort(() => Math.random() - 0.5);
     } else {
       // choice / listen_choice: hiện từ EN → chọn nghĩa VI
-      const correctText = (card.meaning || '').trim();
+      const correctText = (card.meaning || "").trim();
       const pool = viPool.filter(
-        m => m.toLowerCase() !== correctText.toLowerCase()
+        (m) => m.toLowerCase() !== correctText.toLowerCase(),
       );
       let distractors;
       if (pool.length >= 3) {
         const shuffled = [...pool].sort(() => Math.random() - 0.5);
-        distractors = shuffled.slice(0, 3).map(d => ({ text: d, is_correct: false }));
+        distractors = shuffled
+          .slice(0, 3)
+          .map((d) => ({ text: d, is_correct: false }));
       } else {
-        const backendOpts = (card.tasks?.choice?.options || card.tasks?.listen_choice?.options || []).filter(o => !o.is_correct);
+        const backendOpts = (
+          card.tasks?.choice?.options ||
+          card.tasks?.listen_choice?.options ||
+          []
+        ).filter((o) => !o.is_correct);
         if (backendOpts.length > 0) {
-          distractors = backendOpts.map(o => ({ text: o.text, is_correct: false }));
+          distractors = backendOpts.map((o) => ({
+            text: o.text,
+            is_correct: false,
+          }));
         } else {
-          distractors = pool.map(d => ({ text: d, is_correct: false }));
+          distractors = pool.map((d) => ({ text: d, is_correct: false }));
         }
       }
       const options = [{ text: correctText, is_correct: true }, ...distractors];
@@ -700,12 +743,19 @@ export default function FlashcardPlayerPage() {
         // Session is already loaded via fetchSet. Use the current state.
         data = set;
       } else {
-        // Route to the correct API endpoint based on auth status
-        // - /start      → requires valid JWT, enforces daily limits, creates server session
-        // - /start-guest → no auth required, only works for unlimited sets (daily_limit === 0)
-        const endpoint = isAuthenticated
+        // Route to the correct API endpoint based on auth status & box selection
+        // - /start-box/:box → starts session filtered by specific Leitner box
+        // - /start          → requires valid JWT, enforces daily limits, creates server session
+        // - /start-guest    → no auth required, only works for unlimited sets (daily_limit === 0)
+        const searchParams = new URLSearchParams(window.location.search);
+        const boxParam = searchParams.get("box");
+        let endpoint = isAuthenticated
           ? `/flashcards/${id}/start`
           : `/flashcards/${id}/start-guest`;
+
+        if (boxParam && isAuthenticated) {
+          endpoint = `/flashcards/${id}/start-box/${boxParam}`;
+        }
         const response = await axiosInstance.post(endpoint);
         data = response.data;
         setSet(data);
@@ -715,7 +765,8 @@ export default function FlashcardPlayerPage() {
       if (!data.cards || data.cards.length === 0) {
         setErrorModal({
           show: true,
-          message: "Bá»™ tháº» nĂ y hiá»‡n chÆ°a cĂ³ dá»¯ liá»‡u tháº» nĂ o Ä‘á»ƒ luyá»‡n táº­p.",
+          message:
+            "Bá»™ tháº» nĂ y hiá»‡n chÆ°a cĂ³ dá»¯ liá»‡u tháº» nĂ o Ä‘á»ƒ luyá»‡n táº­p.",
           navigateBack: true,
         });
         setLoading(false);
@@ -799,16 +850,19 @@ export default function FlashcardPlayerPage() {
 
     // Kiểm tra xem thiết bị có hỗ trợ nghe thực sự không
     // (phải có cả speechSynthesis API lẫn voices đã load, hoặc card có audio_url)
-    const canListen = !!card.audio_url || (hasSpeechSupport && (hasVoices || checkHasVoices()));
-    const LISTEN_TASKS = ['listen_choice', 'listen_write'];
+    const canListen =
+      !!card.audio_url || (hasSpeechSupport && (hasVoices || checkHasVoices()));
+    const LISTEN_TASKS = ["listen_choice", "listen_write"];
 
     const enabledTasks = [];
     if (card.tasks?.choice?.enabled) enabledTasks.push("choice");
     if (card.tasks?.fill?.enabled) enabledTasks.push("fill");
     if (card.tasks?.complete?.enabled) enabledTasks.push("complete");
     // Chỉ thêm listen tasks nếu trình duyệt/thiết bị thực sự hỗ trợ audio
-    if (card.tasks?.listen_choice?.enabled && canListen) enabledTasks.push("listen_choice");
-    if (card.tasks?.listen_write?.enabled && canListen) enabledTasks.push("listen_write");
+    if (card.tasks?.listen_choice?.enabled && canListen)
+      enabledTasks.push("listen_choice");
+    if (card.tasks?.listen_write?.enabled && canListen)
+      enabledTasks.push("listen_write");
     if (card.tasks?.def_choice?.enabled) enabledTasks.push("def_choice");
     if (card.tasks?.def_write?.enabled) enabledTasks.push("def_write");
 
@@ -817,27 +871,33 @@ export default function FlashcardPlayerPage() {
       // Backend đã chọn sẵn — nhưng nếu là listen task mà không có audio → fallback
       if (LISTEN_TASKS.includes(backendTask) && !canListen) {
         // Fallback: dùng non-listen equivalent hoặc choice
-        pickedTask = backendTask === 'listen_choice' ? 'choice'
-          : backendTask === 'listen_write' ? 'fill'
-          : 'choice';
+        pickedTask =
+          backendTask === "listen_choice"
+            ? "choice"
+            : backendTask === "listen_write"
+              ? "fill"
+              : "choice";
         // Đảm bảo fallback task có trong enabled list (hoặc mặc định choice)
-        if (!enabledTasks.includes(pickedTask)) pickedTask = enabledTasks[0] || 'choice';
+        if (!enabledTasks.includes(pickedTask))
+          pickedTask = enabledTasks[0] || "choice";
       } else {
         pickedTask = backendTask;
       }
     } else {
       // Fallback: chọn ngẫu nhiên trong các task enabled (không bao gồm listen nếu không support)
-      pickedTask = enabledTasks[Math.floor(Math.random() * enabledTasks.length)] || "choice";
+      pickedTask =
+        enabledTasks[Math.floor(Math.random() * enabledTasks.length)] ||
+        "choice";
     }
     setActiveTaskType(pickedTask);
 
     // Build dynamic options cho choice tasks từ session pool (thay đổi mỗi lần)
     let currentOptions = [];
-    if (pickedTask === 'choice' || pickedTask === 'listen_choice') {
-      currentOptions = buildDynamicOptions(card, pickedTask, 'vi', cards);
+    if (pickedTask === "choice" || pickedTask === "listen_choice") {
+      currentOptions = buildDynamicOptions(card, pickedTask, "vi", cards);
       setCardOptions(currentOptions);
-    } else if (pickedTask === 'def_choice') {
-      currentOptions = buildDynamicOptions(card, pickedTask, 'en', cards);
+    } else if (pickedTask === "def_choice") {
+      currentOptions = buildDynamicOptions(card, pickedTask, "en", cards);
       setCardOptions(currentOptions);
     } else {
       setCardOptions([]);
@@ -845,26 +905,49 @@ export default function FlashcardPlayerPage() {
 
     // Decide if this card is presented in Audio Mode
     const randomAudio = Math.random() < 0.4;
-    const isAudio = audioModeEnabled && canListen && (pickedTask === "choice" || pickedTask === "fill") && !card.is_dynamic;
+    const isAudio =
+      audioModeEnabled &&
+      canListen &&
+      (pickedTask === "choice" || pickedTask === "fill") &&
+      !card.is_dynamic;
     setIsAudioMode(isAudio ? randomAudio : false);
     setWordRevealed(false);
 
     // Initial state for choice tasks
-    if (pickedTask === "choice" || pickedTask === "listen_choice" || pickedTask === "def_choice") {
-      const taskKey = pickedTask === "listen_choice" ? "listen_choice" : pickedTask === "def_choice" ? "def_choice" : "choice";
+    if (
+      pickedTask === "choice" ||
+      pickedTask === "listen_choice" ||
+      pickedTask === "def_choice"
+    ) {
+      const taskKey =
+        pickedTask === "listen_choice"
+          ? "listen_choice"
+          : pickedTask === "def_choice"
+            ? "def_choice"
+            : "choice";
       const taskData = card.tasks?.[taskKey] || card.tasks?.choice;
-      const optsList = currentOptions.length > 0 ? currentOptions : (taskData?.options || []);
+      const optsList =
+        currentOptions.length > 0 ? currentOptions : taskData?.options || [];
       const wrongCount = optsList.filter((o) => !o.is_correct).length;
       setAttemptsLeft(wrongCount || 1);
       setCorrectSelected([]);
       setWrongSelected([]);
-      setUserAnswer(card.tasks?.choice?.multiple && pickedTask === "choice" ? [] : null);
-    } else if (pickedTask === "fill" || pickedTask === "listen_write" || pickedTask === "def_write" || pickedTask === "context_def_vi" || pickedTask === "context_def_en") {
+      setUserAnswer(
+        card.tasks?.choice?.multiple && pickedTask === "choice" ? [] : null,
+      );
+    } else if (
+      pickedTask === "fill" ||
+      pickedTask === "listen_write" ||
+      pickedTask === "def_write" ||
+      pickedTask === "context_def_vi" ||
+      pickedTask === "context_def_en"
+    ) {
       setUserAnswer("");
       setAttemptsLeft(3); // Default 3 tries for typing
     } else if (pickedTask === "complete") {
       const patterns = card.tasks?.complete?.patterns || [];
-      const pIdx = patterns.length > 0 ? Math.floor(Math.random() * patterns.length) : 0;
+      const pIdx =
+        patterns.length > 0 ? Math.floor(Math.random() * patterns.length) : 0;
       setActivePatternIdx(pIdx);
       const pattern = patterns[pIdx];
       // Total boxes = sum of lengths of all blanks
@@ -900,9 +983,11 @@ export default function FlashcardPlayerPage() {
 
     // Validation logic based on activeTaskType
     if (activeTaskType === "choice" || activeTaskType === "listen_choice") {
-      const taskKey = activeTaskType === "listen_choice" ? "listen_choice" : "choice";
+      const taskKey =
+        activeTaskType === "listen_choice" ? "listen_choice" : "choice";
       const taskData = card.tasks?.[taskKey] || card.tasks?.choice;
-      const optsList = cardOptions.length > 0 ? cardOptions : (taskData?.options || []);
+      const optsList =
+        cardOptions.length > 0 ? cardOptions : taskData?.options || [];
       const correctOpts = optsList
         .filter((o) => o.is_correct)
         .map((o) => o.text);
@@ -917,9 +1002,17 @@ export default function FlashcardPlayerPage() {
         const singleAns = Array.isArray(answer) ? answer[0] : answer;
         correct = correctOpts.includes(singleAns);
       }
-    } else if (activeTaskType === "fill" || activeTaskType === "listen_write" || activeTaskType === "def_write") {
-      const taskKey = activeTaskType === "listen_write" ? "listen_write"
-        : activeTaskType === "def_write" ? "def_write" : "fill";
+    } else if (
+      activeTaskType === "fill" ||
+      activeTaskType === "listen_write" ||
+      activeTaskType === "def_write"
+    ) {
+      const taskKey =
+        activeTaskType === "listen_write"
+          ? "listen_write"
+          : activeTaskType === "def_write"
+            ? "def_write"
+            : "fill";
       const taskData = card.tasks?.[taskKey] || card.tasks?.fill;
       const answerStr = Array.isArray(answer) ? answer.join("") : answer || "";
       correct = (taskData?.answers || [card.word]).some(
@@ -927,7 +1020,8 @@ export default function FlashcardPlayerPage() {
       );
     } else if (activeTaskType === "def_choice") {
       const taskData = card.tasks?.def_choice;
-      const optsList = cardOptions.length > 0 ? cardOptions : (taskData?.options || []);
+      const optsList =
+        cardOptions.length > 0 ? cardOptions : taskData?.options || [];
       const correctOpts = optsList
         .filter((o) => o.is_correct)
         .map((o) => o.text);
@@ -936,50 +1030,96 @@ export default function FlashcardPlayerPage() {
       }
       const singleAns = Array.isArray(answer) ? answer[0] : answer;
       correct = correctOpts.includes(singleAns);
-    } else if (activeTaskType === "context_def_vi" || activeTaskType === "context_def_en") {
+    } else if (
+      activeTaskType === "context_def_vi" ||
+      activeTaskType === "context_def_en"
+    ) {
       // Write-answer tasks: so sánh với meaning hoặc definition
-      const answerStr = (Array.isArray(answer) ? answer.join("") : answer || "").toLowerCase().trim();
-      const expected = activeTaskType === "context_def_en"
-        ? (card.definition_en || "").toLowerCase().trim()
-        : (card.meaning || "").toLowerCase().trim();
-      correct = answerStr.length > 0 && (answerStr === expected ||
-        expected.includes(answerStr) || answerStr.includes(expected));
+      const answerStr = (Array.isArray(answer) ? answer.join("") : answer || "")
+        .toLowerCase()
+        .trim();
+      const expected =
+        activeTaskType === "context_def_en"
+          ? (card.definition_en || "").toLowerCase().trim()
+          : (card.meaning || "").toLowerCase().trim();
+      correct =
+        answerStr.length > 0 &&
+        (answerStr === expected ||
+          expected.includes(answerStr) ||
+          answerStr.includes(expected));
     } else if (activeTaskType === "complete") {
       const pattern = card.tasks?.complete?.patterns?.[activePatternIdx];
-      if (!pattern) { correct = false; }
-      else {
+      if (!pattern) {
+        correct = false;
+      } else {
         const correctStr = pattern.blanks.join("");
-        const answerStr = Array.isArray(answer) ? answer.join("") : answer || "";
-        correct = correctStr.toLowerCase().trim() === answerStr.toLowerCase().trim();
+        const answerStr = Array.isArray(answer)
+          ? answer.join("")
+          : answer || "";
+        correct =
+          correctStr.toLowerCase().trim() === answerStr.toLowerCase().trim();
       }
     }
 
     // On timeout: all tasks except fill-type auto-fail
-    const isTypingTask = ["fill", "listen_write", "def_write", "context_def_vi", "context_def_en"].includes(activeTaskType);
+    const isTypingTask = [
+      "fill",
+      "listen_write",
+      "def_write",
+      "context_def_vi",
+      "context_def_en",
+    ].includes(activeTaskType);
     if (isTimeout && !isTypingTask) correct = false;
 
     // Helper: get the correct answer string for display
     const getTargetAnswer = () => {
       if (activeTaskType === "choice" || activeTaskType === "listen_choice") {
-        const optsList = cardOptions.length > 0 ? cardOptions : (card.tasks?.[activeTaskType]?.options || card.tasks?.choice?.options || []);
-        const correct = optsList.filter((o) => o.is_correct).map((o) => o.text).join(", ");
+        const optsList =
+          cardOptions.length > 0
+            ? cardOptions
+            : card.tasks?.[activeTaskType]?.options ||
+              card.tasks?.choice?.options ||
+              [];
+        const correct = optsList
+          .filter((o) => o.is_correct)
+          .map((o) => o.text)
+          .join(", ");
         return correct || card.meaning || "";
       }
-      if (activeTaskType === "fill" || activeTaskType === "listen_write" || activeTaskType === "def_write") {
-        const taskKey = activeTaskType === "listen_write" ? "listen_write"
-          : activeTaskType === "def_write" ? "def_write" : "fill";
+      if (
+        activeTaskType === "fill" ||
+        activeTaskType === "listen_write" ||
+        activeTaskType === "def_write"
+      ) {
+        const taskKey =
+          activeTaskType === "listen_write"
+            ? "listen_write"
+            : activeTaskType === "def_write"
+              ? "def_write"
+              : "fill";
         const taskData = card.tasks?.[taskKey] || card.tasks?.fill;
         return (taskData?.answers || [card.word]).join(" | ");
       }
       if (activeTaskType === "def_choice") {
-        const optsList = cardOptions.length > 0 ? cardOptions : (card.tasks?.def_choice?.options || []);
-        const correct = optsList.filter((o) => o.is_correct).map((o) => o.text).join(", ");
+        const optsList =
+          cardOptions.length > 0
+            ? cardOptions
+            : card.tasks?.def_choice?.options || [];
+        const correct = optsList
+          .filter((o) => o.is_correct)
+          .map((o) => o.text)
+          .join(", ");
         return correct || card.word || "";
       }
       if (activeTaskType === "context_def_vi") return card.meaning || "";
-      if (activeTaskType === "context_def_en") return card.definition_en || card.meaning || "";
+      if (activeTaskType === "context_def_en")
+        return card.definition_en || card.meaning || "";
       if (activeTaskType === "complete") {
-        return card.tasks?.complete?.patterns?.[activePatternIdx]?.blanks?.join("") || card.word;
+        return (
+          card.tasks?.complete?.patterns?.[activePatternIdx]?.blanks?.join(
+            "",
+          ) || card.word
+        );
       }
       return card.meaning || card.word || "";
     };
@@ -989,7 +1129,9 @@ export default function FlashcardPlayerPage() {
       card,
       isCorrect: correct,
       userAnswer: Array.isArray(answer)
-        ? (activeTaskType === "choice" || activeTaskType === "listen_choice" || activeTaskType === "def_choice")
+        ? activeTaskType === "choice" ||
+          activeTaskType === "listen_choice" ||
+          activeTaskType === "def_choice"
           ? answer.join(", ")
           : answer.join("")
         : answer || "",
@@ -1199,7 +1341,9 @@ export default function FlashcardPlayerPage() {
     try {
       if (extSessionId) {
         // Load the session directly from the extension-session API
-        const { data } = await axiosInstance.get(`/flashcards/extension-session/${extSessionId}`);
+        const { data } = await axiosInstance.get(
+          `/flashcards/extension-session/${extSessionId}`,
+        );
         setSet(data);
         setSessionId(extSessionId);
         setUsage({
@@ -1207,7 +1351,7 @@ export default function FlashcardPlayerPage() {
           remaining_attempts: 99,
           daily_limit: 0,
           reset_at: null,
-          event_status: "active"
+          event_status: "active",
         });
         setLoading(false);
         return;
@@ -1247,7 +1391,9 @@ export default function FlashcardPlayerPage() {
       const urlSessionId = id;
       const fetchSessionDirect = async () => {
         try {
-          const { data } = await axiosInstance.get(`/flashcards/extension-session/${urlSessionId}`);
+          const { data } = await axiosInstance.get(
+            `/flashcards/extension-session/${urlSessionId}`,
+          );
           setSet(data);
           setSessionId(urlSessionId);
           setUsage({
@@ -1255,7 +1401,7 @@ export default function FlashcardPlayerPage() {
             remaining_attempts: 99,
             daily_limit: 0,
             reset_at: null,
-            event_status: "active"
+            event_status: "active",
           });
           setLoading(false);
         } catch (err) {
@@ -1559,10 +1705,15 @@ export default function FlashcardPlayerPage() {
     if (gameState !== "playing") return;
     const card = set.cards[currentCardIdx];
     // Lấy task data đúng theo activeTaskType (choice, listen_choice, def_choice)
-    const taskKey = activeTaskType === "listen_choice" ? "listen_choice"
-      : activeTaskType === "def_choice" ? "def_choice" : "choice";
+    const taskKey =
+      activeTaskType === "listen_choice"
+        ? "listen_choice"
+        : activeTaskType === "def_choice"
+          ? "def_choice"
+          : "choice";
     const taskData = card.tasks?.[taskKey] || card.tasks?.choice;
-    const optionsList = cardOptions.length > 0 ? cardOptions : (taskData?.options || []);
+    const optionsList =
+      cardOptions.length > 0 ? cardOptions : taskData?.options || [];
     const option = optionsList.find((o) => o.text === optText);
     if (!option) return;
 
@@ -1571,9 +1722,7 @@ export default function FlashcardPlayerPage() {
         const newCorrect = [...correctSelected, optText];
         setCorrectSelected(newCorrect);
 
-        const totalCorrect = optionsList.filter(
-          (o) => o.is_correct,
-        ).length;
+        const totalCorrect = optionsList.filter((o) => o.is_correct).length;
         if (newCorrect.length === totalCorrect) {
           performCheck(newCorrect);
         }
@@ -1726,10 +1875,11 @@ export default function FlashcardPlayerPage() {
                 <button
                   onClick={() => canSkipFastCard && handleNextFastCard()}
                   disabled={!canSkipFastCard}
-                  className={`flex items-center gap-1 transition-colors bg-transparent border-none font-black uppercase tracking-wider ${canSkipFastCard
+                  className={`flex items-center gap-1 transition-colors bg-transparent border-none font-black uppercase tracking-wider ${
+                    canSkipFastCard
                       ? "text-indigo-600 hover:text-indigo-700 cursor-pointer"
                       : "text-slate-300 cursor-not-allowed"
-                    }`}
+                  }`}
                 >
                   {canSkipFastCard ? (
                     <>
@@ -1788,7 +1938,7 @@ export default function FlashcardPlayerPage() {
               >
                 {usage ? (
                   usage.daily_limit === 0 ||
-                    usage.remaining_attempts > 10000 ? (
+                  usage.remaining_attempts > 10000 ? (
                     <span className="text-3xl leading-none">∞</span>
                   ) : (
                     `${usage.daily_limit - usage.remaining_attempts}/${usage.daily_limit}`
@@ -1854,12 +2004,13 @@ export default function FlashcardPlayerPage() {
                 usage?.event_status === "upcoming" ||
                 usage?.event_status === "ended"
               }
-              className={`w-full py-5 font-black rounded-[1.5rem] transition-all flex items-center justify-center gap-3 ${usage?.can_play &&
-                  usage?.event_status !== "upcoming" &&
-                  usage?.event_status !== "ended"
+              className={`w-full py-5 font-black rounded-[1.5rem] transition-all flex items-center justify-center gap-3 ${
+                usage?.can_play &&
+                usage?.event_status !== "upcoming" &&
+                usage?.event_status !== "ended"
                   ? "bg-indigo-600 hover:bg-indigo-700 text-white shadow-lg shadow-indigo-100 active:scale-95"
                   : "bg-slate-200 text-slate-400 cursor-not-allowed"
-                }`}
+              }`}
             >
               {usage?.event_status === "upcoming" ? (
                 <>
@@ -2133,30 +2284,46 @@ export default function FlashcardPlayerPage() {
 
     if (activeTaskType === "choice" && card?.context?.trim())
       return `Trong câu ví dụ, từ "${card.word}" có nghĩa nào phù hợp nhất?`;
-    if (activeTaskType === "choice" && hasChoiceSafeQuestion) return customQuestion;
-    if (activeTaskType === "choice") return `Nghĩa của từ "${card?.word || "..."}" là gì?`;
+    if (activeTaskType === "choice" && hasChoiceSafeQuestion)
+      return customQuestion;
+    if (activeTaskType === "choice")
+      return `Nghĩa của từ "${card?.word || "..."}" là gì?`;
     if (activeTaskType === "fill" && hasFillSafeQuestion) return customQuestion;
     if (activeTaskType === "fill")
       return `Viết từ tiếng Anh có nghĩa là: "${card?.meaning || "..."}"`;
     if (activeTaskType === "complete")
       return `Hoàn thành từ có nghĩa là: "${card?.meaning || "..."}"`;
-    if (activeTaskType === "listen_choice") return "Nghe từ tiếng Anh và chọn nghĩa tiếng Việt đúng";
+    if (activeTaskType === "listen_choice")
+      return "Nghe từ tiếng Anh và chọn nghĩa tiếng Việt đúng";
     if (activeTaskType === "listen_write")
       return `Nghe và viết lại từ tiếng Anh${card?.meaning ? ` (Nghĩa: "${card.meaning}")` : ""}`;
-    if (activeTaskType === "def_choice") return `Cho định nghĩa, chọn từ tiếng Anh phù hợp`;
+    if (activeTaskType === "def_choice")
+      return `Cho định nghĩa, chọn từ tiếng Anh phù hợp`;
     if (activeTaskType === "def_write")
       return `Cho định nghĩa, viết từ tiếng Anh tương ứng${card?.meaning ? ` (Nghĩa: "${card.meaning}")` : ""}`;
-    if (activeTaskType === "context_def_vi") return `Viết định nghĩa tiếng Việt của từ "${card?.word}"`;
-    if (activeTaskType === "context_def_en") return `Viết định nghĩa tiếng Anh của từ "${card?.word}"`;
+    if (activeTaskType === "context_def_vi")
+      return `Viết định nghĩa tiếng Việt của từ "${card?.word}"`;
+    if (activeTaskType === "context_def_en")
+      return `Viết định nghĩa tiếng Anh của từ "${card?.word}"`;
     return `Hoàn thành từ có nghĩa là: "${card?.meaning || "..."}"`;
   };
 
   // Backend question_text là nguồn chính xác khi task type khớp; nếu là dạng viết/hoàn thành mà chưa có nghĩa thì dùng fallback có kèm nghĩa
-  const isWriteOrComplete = activeTaskType === "complete" || activeTaskType === "fill" || activeTaskType === "listen_write" || activeTaskType === "def_write";
-  const hasMeaningInQuestion = card?.meaning && card?.question_text && card.question_text.includes(card.meaning);
-  const taskQuestion = (activeTaskType === card?.selected_task_type && card?.question_text?.trim() && (!isWriteOrComplete || hasMeaningInQuestion))
-    ? card.question_text.trim()
-    : getBackendFallbackQuestion();
+  const isWriteOrComplete =
+    activeTaskType === "complete" ||
+    activeTaskType === "fill" ||
+    activeTaskType === "listen_write" ||
+    activeTaskType === "def_write";
+  const hasMeaningInQuestion =
+    card?.meaning &&
+    card?.question_text &&
+    card.question_text.includes(card.meaning);
+  const taskQuestion =
+    activeTaskType === card?.selected_task_type &&
+    card?.question_text?.trim() &&
+    (!isWriteOrComplete || hasMeaningInQuestion)
+      ? card.question_text.trim()
+      : getBackendFallbackQuestion();
   if (!card && (gameState === "playing" || gameState === "feedback")) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
@@ -2264,7 +2431,11 @@ export default function FlashcardPlayerPage() {
                   ? "bg-indigo-50 border-indigo-200 text-indigo-600 hover:bg-indigo-100"
                   : "bg-slate-50 border-slate-200 text-slate-400 hover:bg-slate-100"
               }`}
-              title={audioModeEnabled ? "Tắt chế độ Audio (Listening)" : "Bật chế độ Audio (Listening)"}
+              title={
+                audioModeEnabled
+                  ? "Tắt chế độ Audio (Listening)"
+                  : "Bật chế độ Audio (Listening)"
+              }
             >
               {audioModeEnabled ? (
                 <Volume2 className="w-4 h-4 animate-pulse" />
@@ -2279,10 +2450,11 @@ export default function FlashcardPlayerPage() {
 
           {streak > 0 && (
             <div
-              className={`flex items-center gap-1 md:gap-2 px-2 md:px-4 py-1 md:py-2 rounded-xl md:rounded-2xl shadow-lg transition-all duration-300 scale-100 animate-in zoom-in-95 ${streak >= 5
+              className={`flex items-center gap-1 md:gap-2 px-2 md:px-4 py-1 md:py-2 rounded-xl md:rounded-2xl shadow-lg transition-all duration-300 scale-100 animate-in zoom-in-95 ${
+                streak >= 5
                   ? "bg-gradient-to-r from-indigo-500 via-purple-500 to-rose-500 text-white shadow-purple-500/30 animate-pulse border border-white/20"
                   : "bg-gradient-to-r from-amber-500 to-rose-500 text-white shadow-rose-500/20 animate-bounce duration-[1500ms]"
-                }`}
+              }`}
             >
               <Zap
                 className={`${streak >= 5 ? "w-3 h-3 md:w-5 md:h-5 animate-spin" : "w-3 h-3 md:w-5 md:h-5 animate-pulse"} fill-current text-white`}
@@ -2352,9 +2524,13 @@ export default function FlashcardPlayerPage() {
                   {isAudioMode && !wordRevealed && gameState !== "feedback" ? (
                     <span className="flex items-center justify-center gap-2 text-indigo-600">
                       <Volume2 className="w-6 h-6 animate-pulse" />
-                      {activeTaskType === "choice" ? "Nghe từ và chọn nghĩa đúng" : "Nghe từ và điền từ tiếng Anh"}
+                      {activeTaskType === "choice"
+                        ? "Nghe từ và chọn nghĩa đúng"
+                        : "Nghe từ và điền từ tiếng Anh"}
                     </span>
-                  ) : taskQuestion}
+                  ) : (
+                    taskQuestion
+                  )}
                 </h3>
 
                 {activeTaskType === "choice" && card?.context?.trim() && (
@@ -2436,7 +2612,8 @@ export default function FlashcardPlayerPage() {
                         </span>
                         <span className="text-sm font-black text-indigo-600">
                           {correctSelected.length} /{" "}
-                          {(cardOptions || []).filter((o) => o.is_correct).length || 1}
+                          {(cardOptions || []).filter((o) => o.is_correct)
+                            .length || 1}
                         </span>
                       </div>
                       <div className="flex items-center gap-2">
@@ -2451,9 +2628,14 @@ export default function FlashcardPlayerPage() {
                       </div>
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      {(cardOptions.length > 0 ? cardOptions : card.tasks?.choice?.options || []).map((opt, i) => {
+                      {(cardOptions.length > 0
+                        ? cardOptions
+                        : card.tasks?.choice?.options || []
+                      ).map((opt, i) => {
                         const isWrong = wrongSelected.includes(opt.text);
-                        const isCorrectFound = correctSelected.includes(opt.text);
+                        const isCorrectFound = correctSelected.includes(
+                          opt.text,
+                        );
 
                         return (
                           <button
@@ -2464,12 +2646,13 @@ export default function FlashcardPlayerPage() {
                               isCorrectFound
                             }
                             onClick={() => handleChoiceToggle(opt.text)}
-                            className={`group p-6 rounded-[1.5rem] border-2 transition-all text-left relative active:scale-98 ${isCorrectFound
+                            className={`group p-6 rounded-[1.5rem] border-2 transition-all text-left relative active:scale-98 ${
+                              isCorrectFound
                                 ? "bg-emerald-50 border-emerald-500 text-emerald-700"
                                 : isWrong
                                   ? "bg-rose-50 border-rose-200 text-rose-300 cursor-not-allowed"
                                   : "bg-white border-slate-200 hover:border-indigo-300 text-slate-600"
-                              }`}
+                            }`}
                           >
                             <span className="text-lg font-bold">
                               {opt.text}
@@ -2535,15 +2718,20 @@ export default function FlashcardPlayerPage() {
                       autoCorrect="off"
                       autoCapitalize="off"
                       spellCheck="false"
-                      placeholder={isAudioMode ? "Nhập từ bạn vừa nghe..." : "Dịch tại đây..."}
-                      className={`w-full p-4 md:p-8 bg-slate-50 rounded-2xl md:rounded-[2rem] text-xl md:text-4xl font-black text-center outline-none border-2 transition-all ${gameState === "feedback"
+                      placeholder={
+                        isAudioMode
+                          ? "Nhập từ bạn vừa nghe..."
+                          : "Dịch tại đây..."
+                      }
+                      className={`w-full p-4 md:p-8 bg-slate-50 rounded-2xl md:rounded-[2rem] text-xl md:text-4xl font-black text-center outline-none border-2 transition-all ${
+                        gameState === "feedback"
                           ? isCorrect
                             ? "border-emerald-500 bg-emerald-50 text-emerald-700"
                             : "border-rose-500 bg-rose-50 text-rose-700"
                           : isCorrect === false
                             ? "border-rose-500 bg-rose-50 animate-shake"
                             : "border-transparent focus:border-indigo-600 focus:bg-white text-slate-800"
-                        }`}
+                      }`}
                       value={userAnswer || ""}
                       onChange={(e) => setUserAnswer(e.target.value)}
                       onKeyDown={(e) =>
@@ -2602,9 +2790,11 @@ export default function FlashcardPlayerPage() {
 
                           // Split on spaces so each "word" is a non-breaking unit
                           const wordSegments = pattern.display_text.split(" ");
-                          const globalTotalBlanks = (pattern.display_text.match(/_/g) || []).length;
+                          const globalTotalBlanks = (
+                            pattern.display_text.match(/_/g) || []
+                          ).length;
                           let globalBlankIdx = 0; // running index across ALL blanks
-                          let charBoxIdx = 0;     // running index of input boxes
+                          let charBoxIdx = 0; // running index of input boxes
 
                           return wordSegments.map((segment, segIdx) => {
                             // Each segment may contain 0 or more "_" markers
@@ -2615,9 +2805,15 @@ export default function FlashcardPlayerPage() {
                             globalBlankIdx += segBlanksCount;
 
                             return (
-                              <div key={segIdx} className="flex items-center flex-nowrap shrink-0">
+                              <div
+                                key={segIdx}
+                                className="flex items-center flex-nowrap shrink-0"
+                              >
                                 {segParts.map((part, i) => (
-                                  <div key={i} className="flex items-center flex-nowrap">
+                                  <div
+                                    key={i}
+                                    className="flex items-center flex-nowrap"
+                                  >
                                     {Array.from(part).map((char, charIdx) => (
                                       <div
                                         key={charIdx}
@@ -2627,63 +2823,110 @@ export default function FlashcardPlayerPage() {
                                       </div>
                                     ))}
 
-                                    {i < segParts.length - 1 && (() => {
-                                      // Determine which data blank(s) this "_" maps to
-                                      const blankDataIdx = segStartBlankIdx + i;
-                                      const blanksToRender =
-                                        globalTotalBlanks === 1 && pattern.blanks.length > 1
-                                          ? pattern.blanks          // single marker = all blanks grouped
-                                          : [pattern.blanks[blankDataIdx] || ""];
+                                    {i < segParts.length - 1 &&
+                                      (() => {
+                                        // Determine which data blank(s) this "_" maps to
+                                        const blankDataIdx =
+                                          segStartBlankIdx + i;
+                                        const blanksToRender =
+                                          globalTotalBlanks === 1 &&
+                                          pattern.blanks.length > 1
+                                            ? pattern.blanks // single marker = all blanks grouped
+                                            : [
+                                                pattern.blanks[blankDataIdx] ||
+                                                  "",
+                                              ];
 
-                                      return (
-                                        <div key={`blanks-${segIdx}-${i}`} className="flex gap-0.5 md:gap-1 shrink-0">
-                                          {blanksToRender.flatMap((blk, bIdxInGroup) =>
-                                            Array.from({ length: blk.length || 1 }).map((_, subIdx) => {
-                                              const currentIdx = charBoxIdx;
-                                              charBoxIdx++;
-                                              return (
-                                                <input
-                                                  key={`${bIdxInGroup}-${subIdx}`}
-                                                  id={`complete-input-${currentIdx}`}
-                                                  autoFocus={currentIdx === 0}
-                                                  disabled={gameState === "feedback"}
-                                                  type="text"
-                                                  maxLength={1}
-                                                  spellCheck={false}
-                                                  autoComplete="off"
-                                                  autoCorrect="off"
-                                                  autoCapitalize="off"
-                                                  value={userAnswer[currentIdx] || ""}
-                                                  onChange={(e) => {
-                                                    const val = e.target.value.slice(-1);
-                                                    const newAns = [...userAnswer];
-                                                    newAns[currentIdx] = val;
-                                                    setUserAnswer(newAns);
-                                                    if (val && currentIdx < userAnswer.length - 1) {
-                                                      document.getElementById(`complete-input-${currentIdx + 1}`)?.focus();
-                                                    }
-                                                  }}
-                                                  onKeyDown={(e) => {
-                                                    if (e.key === "Backspace" && !userAnswer[currentIdx] && currentIdx > 0) {
-                                                      document.getElementById(`complete-input-${currentIdx - 1}`)?.focus();
-                                                    }
-                                                  }}
-                                                  className={`w-[1.1ch] md:w-12 h-10 md:h-14 bg-transparent md:bg-slate-50 border-b-2 md:border-4 md:rounded-2xl mx-[0.5px] md:mx-0.5 text-xl md:text-2xl font-black text-center outline-none transition-all shrink-0 ${gameState === "feedback"
-                                                      ? isCorrect
-                                                        ? "border-emerald-500 md:bg-emerald-50 text-emerald-700"
-                                                        : "border-rose-500 md:bg-rose-50 text-rose-700"
-                                                      : isCorrect === false
-                                                        ? "border-rose-500 md:bg-rose-50 animate-shake"
-                                                        : "border-slate-200 md:border-slate-100 focus:border-indigo-600 md:focus:bg-white text-slate-800"
-                                                    }`}
-                                                  placeholder=""
-                                                />
-                                              );
-                                            })
-                                          )}
-                                        </div>
-                                      );
-                                    })()}
+                                        return (
+                                          <div
+                                            key={`blanks-${segIdx}-${i}`}
+                                            className="flex gap-0.5 md:gap-1 shrink-0"
+                                          >
+                                            {blanksToRender.flatMap(
+                                              (blk, bIdxInGroup) =>
+                                                Array.from({
+                                                  length: blk.length || 1,
+                                                }).map((_, subIdx) => {
+                                                  const currentIdx = charBoxIdx;
+                                                  charBoxIdx++;
+                                                  return (
+                                                    <input
+                                                      key={`${bIdxInGroup}-${subIdx}`}
+                                                      id={`complete-input-${currentIdx}`}
+                                                      autoFocus={
+                                                        currentIdx === 0
+                                                      }
+                                                      disabled={
+                                                        gameState === "feedback"
+                                                      }
+                                                      type="text"
+                                                      maxLength={1}
+                                                      spellCheck={false}
+                                                      autoComplete="off"
+                                                      autoCorrect="off"
+                                                      autoCapitalize="off"
+                                                      value={
+                                                        userAnswer[
+                                                          currentIdx
+                                                        ] || ""
+                                                      }
+                                                      onChange={(e) => {
+                                                        const val =
+                                                          e.target.value.slice(
+                                                            -1,
+                                                          );
+                                                        const newAns = [
+                                                          ...userAnswer,
+                                                        ];
+                                                        newAns[currentIdx] =
+                                                          val;
+                                                        setUserAnswer(newAns);
+                                                        if (
+                                                          val &&
+                                                          currentIdx <
+                                                            userAnswer.length -
+                                                              1
+                                                        ) {
+                                                          document
+                                                            .getElementById(
+                                                              `complete-input-${currentIdx + 1}`,
+                                                            )
+                                                            ?.focus();
+                                                        }
+                                                      }}
+                                                      onKeyDown={(e) => {
+                                                        if (
+                                                          e.key ===
+                                                            "Backspace" &&
+                                                          !userAnswer[
+                                                            currentIdx
+                                                          ] &&
+                                                          currentIdx > 0
+                                                        ) {
+                                                          document
+                                                            .getElementById(
+                                                              `complete-input-${currentIdx - 1}`,
+                                                            )
+                                                            ?.focus();
+                                                        }
+                                                      }}
+                                                      className={`w-[1.1ch] md:w-12 h-10 md:h-14 bg-transparent md:bg-slate-50 border-b-2 md:border-4 md:rounded-2xl mx-[0.5px] md:mx-0.5 text-xl md:text-2xl font-black text-center outline-none transition-all shrink-0 ${
+                                                        gameState === "feedback"
+                                                          ? isCorrect
+                                                            ? "border-emerald-500 md:bg-emerald-50 text-emerald-700"
+                                                            : "border-rose-500 md:bg-rose-50 text-rose-700"
+                                                          : isCorrect === false
+                                                            ? "border-rose-500 md:bg-rose-50 animate-shake"
+                                                            : "border-slate-200 md:border-slate-100 focus:border-indigo-600 md:focus:bg-white text-slate-800"
+                                                      }`}
+                                                      placeholder=""
+                                                    />
+                                                  );
+                                                }),
+                                            )}
+                                          </div>
+                                        );
+                                      })()}
                                   </div>
                                 ))}
                               </div>
@@ -2696,85 +2939,117 @@ export default function FlashcardPlayerPage() {
                 )}
 
                 {/* Listen Choice / Def Choice — Same UI as regular choice */}
-                {(activeTaskType === "listen_choice" || activeTaskType === "def_choice") && (() => {
-                  const taskKey = activeTaskType === "listen_choice" ? "listen_choice" : "def_choice";
-                  const taskData = card.tasks?.[taskKey] || card.tasks?.choice;
-                  if (!taskData) return null;
-                  const renderOptions = cardOptions.length > 0 ? cardOptions : (taskData.options || []);
-                  return (
-                    <div className="space-y-4">
-                      {/* For listen_choice: show listen controls */}
-                      {activeTaskType === "listen_choice" && (
-                        <div className="flex justify-center gap-3 mb-2">
-                          <button
-                            onClick={() => playCardAudio(card)}
-                            className="flex items-center gap-2 px-5 py-2.5 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-xl text-indigo-600 font-bold transition-all shadow-sm active:scale-95"
-                          >
-                            <Volume2 className="w-4 h-4 animate-pulse" />
-                            Nghe từ
-                          </button>
-                        </div>
-                      )}
-                      {/* For def_choice: show definition */}
-                      {activeTaskType === "def_choice" && (card.definition_en || card.definition_vi) && (
-                        <blockquote className="mx-auto max-w-2xl rounded-2xl border border-indigo-100 bg-indigo-50/60 px-5 py-4 text-left text-base font-semibold leading-relaxed text-slate-700">
-                          <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest block mb-1">Định nghĩa</span>
-                          {card.definition_en || card.definition_vi}
-                        </blockquote>
-                      )}
-
-                      <div className="flex items-center justify-between px-4">
-                        <div className="flex items-center gap-2">
-                          <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                            Progress
-                          </span>
-                          <span className="text-sm font-black text-indigo-600">
-                            {correctSelected.length} /{" "}
-                            {(renderOptions || []).filter((o) => o.is_correct).length || 1}
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                            Attempts Left
-                          </span>
-                          <span
-                            className={`text-sm font-black ${attemptsLeft === 1 ? "text-rose-500 animate-pulse" : "text-slate-600"}`}
-                          >
-                            {attemptsLeft}
-                          </span>
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        {renderOptions.map((opt, i) => {
-                          const isWrong = wrongSelected.includes(opt.text);
-                          const isCorrectFound = correctSelected.includes(opt.text);
-                          return (
+                {(activeTaskType === "listen_choice" ||
+                  activeTaskType === "def_choice") &&
+                  (() => {
+                    const taskKey =
+                      activeTaskType === "listen_choice"
+                        ? "listen_choice"
+                        : "def_choice";
+                    const taskData =
+                      card.tasks?.[taskKey] || card.tasks?.choice;
+                    if (!taskData) return null;
+                    const renderOptions =
+                      cardOptions.length > 0
+                        ? cardOptions
+                        : taskData.options || [];
+                    return (
+                      <div className="space-y-4">
+                        {/* For listen_choice: show listen controls */}
+                        {activeTaskType === "listen_choice" && (
+                          <div className="flex justify-center gap-3 mb-2">
                             <button
-                              key={i}
-                              disabled={gameState === "feedback" || isWrong || isCorrectFound}
-                              onClick={() => handleChoiceToggle(opt.text)}
-                              className={`group p-6 rounded-[1.5rem] border-2 transition-all text-left relative active:scale-98 ${isCorrectFound
-                                ? "bg-emerald-50 border-emerald-500 text-emerald-700"
-                                : isWrong
-                                  ? "bg-rose-50 border-rose-200 text-rose-300 cursor-not-allowed"
-                                  : "bg-white border-slate-200 hover:border-indigo-300 text-slate-600"
-                              }`}
+                              onClick={() => playCardAudio(card)}
+                              className="flex items-center gap-2 px-5 py-2.5 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-xl text-indigo-600 font-bold transition-all shadow-sm active:scale-95"
                             >
-                              <span className="text-lg font-bold">{opt.text}</span>
-                              {isCorrectFound && <CheckCircle2 className="absolute top-4 right-4 w-5 h-5 text-emerald-500" />}
-                              {isWrong && <X className="absolute top-4 right-4 w-5 h-5 text-rose-300" />}
+                              <Volume2 className="w-4 h-4 animate-pulse" />
+                              Nghe từ
                             </button>
-                          );
-                        })}
+                          </div>
+                        )}
+                        {/* For def_choice: show definition */}
+                        {activeTaskType === "def_choice" &&
+                          (card.definition_en || card.definition_vi) && (
+                            <blockquote className="mx-auto max-w-2xl rounded-2xl border border-indigo-100 bg-indigo-50/60 px-5 py-4 text-left text-base font-semibold leading-relaxed text-slate-700">
+                              <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest block mb-1">
+                                Định nghĩa
+                              </span>
+                              {card.definition_en || card.definition_vi}
+                            </blockquote>
+                          )}
+
+                        <div className="flex items-center justify-between px-4">
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                              Progress
+                            </span>
+                            <span className="text-sm font-black text-indigo-600">
+                              {correctSelected.length} /{" "}
+                              {(renderOptions || []).filter((o) => o.is_correct)
+                                .length || 1}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                              Attempts Left
+                            </span>
+                            <span
+                              className={`text-sm font-black ${attemptsLeft === 1 ? "text-rose-500 animate-pulse" : "text-slate-600"}`}
+                            >
+                              {attemptsLeft}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          {renderOptions.map((opt, i) => {
+                            const isWrong = wrongSelected.includes(opt.text);
+                            const isCorrectFound = correctSelected.includes(
+                              opt.text,
+                            );
+                            return (
+                              <button
+                                key={i}
+                                disabled={
+                                  gameState === "feedback" ||
+                                  isWrong ||
+                                  isCorrectFound
+                                }
+                                onClick={() => handleChoiceToggle(opt.text)}
+                                className={`group p-6 rounded-[1.5rem] border-2 transition-all text-left relative active:scale-98 ${
+                                  isCorrectFound
+                                    ? "bg-emerald-50 border-emerald-500 text-emerald-700"
+                                    : isWrong
+                                      ? "bg-rose-50 border-rose-200 text-rose-300 cursor-not-allowed"
+                                      : "bg-white border-slate-200 hover:border-indigo-300 text-slate-600"
+                                }`}
+                              >
+                                <span className="text-lg font-bold">
+                                  {opt.text}
+                                </span>
+                                {isCorrectFound && (
+                                  <CheckCircle2 className="absolute top-4 right-4 w-5 h-5 text-emerald-500" />
+                                )}
+                                {isWrong && (
+                                  <X className="absolute top-4 right-4 w-5 h-5 text-rose-300" />
+                                )}
+                              </button>
+                            );
+                          })}
+                        </div>
                       </div>
-                    </div>
-                  );
-                })()}
+                    );
+                  })()}
 
                 {/* Listen Write / Def Write / Context Def — Text input like fill */}
-                {(activeTaskType === "listen_write" || activeTaskType === "def_write" || activeTaskType === "context_def_vi" || activeTaskType === "context_def_en") && (
-                  <div key={`${currentCardIdx}-${activeTaskType}`} className="relative flex flex-col items-center gap-4 md:gap-6">
+                {(activeTaskType === "listen_write" ||
+                  activeTaskType === "def_write" ||
+                  activeTaskType === "context_def_vi" ||
+                  activeTaskType === "context_def_en") && (
+                  <div
+                    key={`${currentCardIdx}-${activeTaskType}`}
+                    className="relative flex flex-col items-center gap-4 md:gap-6"
+                  >
                     {/* For listen_write: show listen control */}
                     {activeTaskType === "listen_write" && (
                       <div className="flex justify-center gap-3">
@@ -2788,23 +3063,34 @@ export default function FlashcardPlayerPage() {
                       </div>
                     )}
                     {/* For def_write: show definition */}
-                    {(activeTaskType === "def_write") && (card.definition_en || card.definition_vi) && (
-                      <blockquote className="w-full mx-auto max-w-2xl rounded-2xl border border-indigo-100 bg-indigo-50/60 px-5 py-4 text-left text-base font-semibold leading-relaxed text-slate-700">
-                        <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest block mb-1">Định nghĩa</span>
-                        {card.definition_en || card.definition_vi}
-                      </blockquote>
-                    )}
+                    {activeTaskType === "def_write" &&
+                      (card.definition_en || card.definition_vi) && (
+                        <blockquote className="w-full mx-auto max-w-2xl rounded-2xl border border-indigo-100 bg-indigo-50/60 px-5 py-4 text-left text-base font-semibold leading-relaxed text-slate-700">
+                          <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest block mb-1">
+                            Định nghĩa
+                          </span>
+                          {card.definition_en || card.definition_vi}
+                        </blockquote>
+                      )}
                     {/* For context tasks: show context sentence */}
-                    {(activeTaskType === "context_def_vi" || activeTaskType === "context_def_en") && card.context?.trim() && (
-                      <blockquote className="w-full mx-auto max-w-2xl rounded-2xl border border-indigo-100 bg-indigo-50/60 px-5 py-4 text-left text-base font-semibold leading-relaxed text-slate-700">
-                        <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest block mb-1">Câu ngữ cảnh</span>
-                        {card.context}
-                      </blockquote>
-                    )}
+                    {(activeTaskType === "context_def_vi" ||
+                      activeTaskType === "context_def_en") &&
+                      card.context?.trim() && (
+                        <blockquote className="w-full mx-auto max-w-2xl rounded-2xl border border-indigo-100 bg-indigo-50/60 px-5 py-4 text-left text-base font-semibold leading-relaxed text-slate-700">
+                          <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest block mb-1">
+                            Câu ngữ cảnh
+                          </span>
+                          {card.context}
+                        </blockquote>
+                      )}
                     <div className="w-full flex items-center justify-end mb-2">
                       <div className="flex items-center gap-2 px-3 py-1 bg-slate-50/50 rounded-full border border-slate-100">
-                        <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">SỐ LẦN THỬ</span>
-                        <span className="text-sm font-black text-slate-600">{attemptsLeft}</span>
+                        <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                          SỐ LẦN THỬ
+                        </span>
+                        <span className="text-sm font-black text-slate-600">
+                          {attemptsLeft}
+                        </span>
                       </div>
                     </div>
                     <input
@@ -2816,22 +3102,28 @@ export default function FlashcardPlayerPage() {
                       autoCapitalize="off"
                       spellCheck="false"
                       placeholder={
-                        activeTaskType === "listen_write" ? "Viết từ bạn vừa nghe..."
-                        : activeTaskType === "def_write" ? "Viết từ tiếng Anh..."
-                        : activeTaskType === "context_def_en" ? "Viết định nghĩa tiếng Anh..."
-                        : "Viết định nghĩa tiếng Việt..."
+                        activeTaskType === "listen_write"
+                          ? "Viết từ bạn vừa nghe..."
+                          : activeTaskType === "def_write"
+                            ? "Viết từ tiếng Anh..."
+                            : activeTaskType === "context_def_en"
+                              ? "Viết định nghĩa tiếng Anh..."
+                              : "Viết định nghĩa tiếng Việt..."
                       }
-                      className={`w-full p-4 md:p-8 bg-slate-50 rounded-2xl md:rounded-[2rem] text-xl md:text-4xl font-black text-center outline-none border-2 transition-all ${gameState === "feedback"
-                        ? isCorrect
-                          ? "border-emerald-500 bg-emerald-50 text-emerald-700"
-                          : "border-rose-500 bg-rose-50 text-rose-700"
-                        : isCorrect === false
-                          ? "border-rose-500 bg-rose-50 animate-shake"
-                          : "border-transparent focus:border-indigo-600 focus:bg-white text-slate-800"
+                      className={`w-full p-4 md:p-8 bg-slate-50 rounded-2xl md:rounded-[2rem] text-xl md:text-4xl font-black text-center outline-none border-2 transition-all ${
+                        gameState === "feedback"
+                          ? isCorrect
+                            ? "border-emerald-500 bg-emerald-50 text-emerald-700"
+                            : "border-rose-500 bg-rose-50 text-rose-700"
+                          : isCorrect === false
+                            ? "border-rose-500 bg-rose-50 animate-shake"
+                            : "border-transparent focus:border-indigo-600 focus:bg-white text-slate-800"
                       }`}
                       value={userAnswer || ""}
                       onChange={(e) => setUserAnswer(e.target.value)}
-                      onKeyDown={(e) => e.key === "Enter" && handleCheckAnswer()}
+                      onKeyDown={(e) =>
+                        e.key === "Enter" && handleCheckAnswer()
+                      }
                     />
                   </div>
                 )}
@@ -3002,7 +3294,6 @@ export default function FlashcardPlayerPage() {
                     );
                   })()}
               </div>
-
             </div>
 
             {/* Progress Decorations */}
@@ -3034,7 +3325,7 @@ export default function FlashcardPlayerPage() {
                 onClick={handleNext}
                 className="px-10 py-4 bg-indigo-600 hover:bg-indigo-700 text-white font-black rounded-2xl shadow-xl shadow-indigo-200 flex items-center gap-3 transition-all active:scale-95 animate-bounce-horizontal"
               >
-                {(currentCardIdx < (set?.cards?.length || 0) - 1)
+                {currentCardIdx < (set?.cards?.length || 0) - 1
                   ? "TIẾP THEO"
                   : "KẾT THÚC"}
                 <ArrowRight className="w-5 h-5" />
@@ -3051,7 +3342,9 @@ export default function FlashcardPlayerPage() {
             className={`bg-white/96 backdrop-blur-xl rounded-2xl shadow-2xl border-2 transition-all flex flex-col relative overflow-hidden max-h-[88vh] overflow-y-auto ${isCorrect ? "border-emerald-200" : "border-rose-200"}`}
           >
             {/* Header */}
-            <div className={`flex items-center gap-3 px-5 py-4 ${isCorrect ? "bg-emerald-50/80" : "bg-rose-50/80"}`}>
+            <div
+              className={`flex items-center gap-3 px-5 py-4 ${isCorrect ? "bg-emerald-50/80" : "bg-rose-50/80"}`}
+            >
               <div
                 className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 text-white shadow-md ${isCorrect ? "bg-emerald-500" : "bg-rose-500"}`}
               >
@@ -3062,10 +3355,14 @@ export default function FlashcardPlayerPage() {
                 )}
               </div>
               <div className="flex-1 min-w-0">
-                <h4 className={`text-base font-black leading-none ${isCorrect ? "text-emerald-700" : "text-rose-700"}`}>
+                <h4
+                  className={`text-base font-black leading-none ${isCorrect ? "text-emerald-700" : "text-rose-700"}`}
+                >
                   {isCorrect ? "Tuyệt vời! 🎉" : "Chưa chính xác"}
                 </h4>
-                <p className={`text-[9px] font-black uppercase tracking-widest mt-0.5 opacity-60 ${isCorrect ? "text-emerald-700" : "text-rose-700"}`}>
+                <p
+                  className={`text-[9px] font-black uppercase tracking-widest mt-0.5 opacity-60 ${isCorrect ? "text-emerald-700" : "text-rose-700"}`}
+                >
                   {isCorrect ? "+ ĐIỂM KINH NGHIỆM" : "HÃY GHI NHỚ LẦN SAU"}
                 </p>
               </div>
@@ -3076,8 +3373,12 @@ export default function FlashcardPlayerPage() {
               {/* Word row */}
               <div className="flex items-center justify-between gap-2">
                 <div className="flex-1 min-w-0">
-                  <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 block mb-0.5">TỪ VỰNG</span>
-                  <h2 className="text-2xl font-black text-slate-800 leading-tight truncate">{card.word}</h2>
+                  <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 block mb-0.5">
+                    TỪ VỰNG
+                  </span>
+                  <h2 className="text-2xl font-black text-slate-800 leading-tight truncate">
+                    {card.word}
+                  </h2>
                 </div>
                 <button
                   onClick={() => speakWord(card.word)}
@@ -3089,7 +3390,9 @@ export default function FlashcardPlayerPage() {
 
               {/* Meaning */}
               <div>
-                <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 block mb-1">Ý NGHĨA</span>
+                <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 block mb-1">
+                  Ý NGHĨA
+                </span>
                 <p className="text-sm font-semibold text-slate-700 bg-slate-50 px-3 py-2 rounded-xl border border-slate-100 leading-snug">
                   {card.meaning}
                 </p>
@@ -3098,16 +3401,22 @@ export default function FlashcardPlayerPage() {
               {/* Correct answer (only on wrong) */}
               {!isCorrect && (
                 <div className="px-3 py-2.5 bg-rose-50 rounded-xl border border-rose-100">
-                  <span className="text-[9px] font-black uppercase tracking-widest text-rose-500 block mb-0.5">ĐÁP ÁN ĐÚNG</span>
+                  <span className="text-[9px] font-black uppercase tracking-widest text-rose-500 block mb-0.5">
+                    ĐÁP ÁN ĐÚNG
+                  </span>
                   <p className="text-base font-black text-rose-700 break-words leading-snug">
                     {userResults[userResults.length - 1]?.targetAnswer ||
                       (() => {
                         if (activeTaskType === "choice")
-                          return card.tasks.choice?.options?.find((o) => o.is_correct)?.text;
+                          return card.tasks.choice?.options?.find(
+                            (o) => o.is_correct,
+                          )?.text;
                         if (activeTaskType === "fill")
                           return card.tasks.fill?.answers?.[0];
                         if (activeTaskType === "complete")
-                          return card.tasks.complete?.patterns?.[activePatternIdx]?.blanks?.join("");
+                          return card.tasks.complete?.patterns?.[
+                            activePatternIdx
+                          ]?.blanks?.join("");
                       })()}
                   </p>
                 </div>
@@ -3118,7 +3427,8 @@ export default function FlashcardPlayerPage() {
                 <Brain className="w-3.5 h-3.5 text-slate-400 shrink-0 mt-0.5" />
                 <p className="text-xs text-slate-500 font-medium leading-snug">
                   {isCorrect
-                    ? card.feedback_correct || "Bạn đang làm rất tốt! Tiếp tục nhé."
+                    ? card.feedback_correct ||
+                      "Bạn đang làm rất tốt! Tiếp tục nhé."
                     : card.feedback_incorrect || "Sai lầm là mẹ thành công!"}
                 </p>
               </div>
@@ -3128,12 +3438,15 @@ export default function FlashcardPlayerPage() {
             <div className="px-5 pb-4">
               <button
                 onClick={handleNext}
-                className={`w-full py-3.5 rounded-xl font-black uppercase tracking-wide text-sm transition-all active:scale-95 flex items-center justify-center gap-2 shadow-md ${isCorrect
+                className={`w-full py-3.5 rounded-xl font-black uppercase tracking-wide text-sm transition-all active:scale-95 flex items-center justify-center gap-2 shadow-md ${
+                  isCorrect
                     ? "bg-emerald-500 hover:bg-emerald-600 text-white shadow-emerald-200"
                     : "bg-rose-500 hover:bg-rose-600 text-white shadow-rose-200"
-                  }`}
+                }`}
               >
-                {currentCardIdx < set.cards.length - 1 ? "Từ Tiếp Theo" : "Hoàn thành"}
+                {currentCardIdx < set.cards.length - 1
+                  ? "Từ Tiếp Theo"
+                  : "Hoàn thành"}
                 <ArrowRight className="w-4 h-4" />
               </button>
             </div>
@@ -3277,15 +3590,16 @@ export default function FlashcardPlayerPage() {
           <div
             key={toast.id}
             className={`pointer-events-auto col-start-1 row-start-1 bg-white/95 backdrop-blur-xl border-2 shadow-2xl flex items-center gap-3 md:gap-4 animate-in slide-in-from-top-4 md:slide-in-from-right-10 duration-500 overflow-hidden
-              ${toast.type === "mastered"
-                ? "border-emerald-100"
-                : toast.type === "first_encounter"
-                  ? "border-indigo-100"
-                  : toast.type === "first_fill"
-                    ? "border-purple-100"
-                    : toast.type === "unlocked"
-                      ? "border-emerald-100"
-                      : "border-amber-100"
+              ${
+                toast.type === "mastered"
+                  ? "border-emerald-100"
+                  : toast.type === "first_encounter"
+                    ? "border-indigo-100"
+                    : toast.type === "first_fill"
+                      ? "border-purple-100"
+                      : toast.type === "unlocked"
+                        ? "border-emerald-100"
+                        : "border-amber-100"
               }
               rounded-2xl md:rounded-3xl p-3 md:p-5 w-full max-w-[320px] md:max-w-sm
             `}
@@ -3293,7 +3607,8 @@ export default function FlashcardPlayerPage() {
             {/* Icon Section */}
             <div
               className={`shrink-0 flex items-center justify-center shadow-lg
-              ${toast.type === "mastered"
+              ${
+                toast.type === "mastered"
                   ? "w-10 h-10 md:w-12 md:h-12 bg-emerald-50 text-emerald-500 rounded-xl md:rounded-2xl animate-bounce"
                   : toast.type === "first_encounter"
                     ? "w-10 h-10 md:w-12 md:h-12 bg-indigo-50 text-indigo-500 rounded-xl md:rounded-2xl"
@@ -3302,7 +3617,7 @@ export default function FlashcardPlayerPage() {
                       : toast.type === "unlocked"
                         ? "w-10 h-10 md:w-12 md:h-12 bg-emerald-50 text-emerald-500 rounded-xl md:rounded-2xl animate-pulse"
                         : `w-10 h-10 md:w-12 md:h-12 rounded-xl md:rounded-2xl ${toast.bonusType === "mastery" ? "bg-amber-100 text-amber-600" : "bg-indigo-100 text-indigo-600"}`
-                }
+              }
             `}
             >
               {toast.type === "bonus" ? (
@@ -3324,7 +3639,8 @@ export default function FlashcardPlayerPage() {
             <div className="flex-1 min-w-0">
               <span
                 className={`text-[8px] md:text-[9px] font-black uppercase tracking-widest block mb-0.5
-                ${toast.type === "mastered"
+                ${
+                  toast.type === "mastered"
                     ? "text-emerald-600"
                     : toast.type === "first_encounter"
                       ? "text-indigo-600"
@@ -3333,7 +3649,7 @@ export default function FlashcardPlayerPage() {
                         : toast.type === "unlocked"
                           ? "text-emerald-600 animate-pulse"
                           : "text-amber-600"
-                  }
+                }
               `}
               >
                 {toast.type === "mastered"

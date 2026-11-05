@@ -68,6 +68,15 @@ async def get_dictionary_cache(
     return await service.get_dictionary_cache(limit=limit, src=src, dest=dest)
 
 
+@router.get("/user-leitner-stats", response_model=Dict[str, Any])
+async def get_user_leitner_stats(user: dict = Depends(get_current_user)):
+    """Lấy thống kê số lượng từ trong mỗi Leitner Box của user hiện tại và chi tiết ngày ôn tập."""
+    user_id = user.get("sub") or user.get("id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Yêu cầu đăng nhập.")
+    return await service.get_user_leitner_stats(user_id=user_id)
+
+
 # ── FLASHCARD SET MANAGEMENT ─────────────────────────────────────────────────
 
 @router.get("", response_model=List[Dict[str, Any]])
@@ -147,11 +156,27 @@ async def get_flashcard_usage(
 @router.post("/{set_id}/start", response_model=FlashcardSessionStartResponse)
 async def start_authenticated_session(
     set_id: str,
+    box: Optional[int] = None,
     user: dict = Depends(get_current_user)
 ):
-    """Bắt đầu phiên học dành cho người dùng đã đăng nhập (kiểm tra daily limit và lưu tiến độ)."""
-    user_id = user.get("sub")
+    """Bắt đầu phiên học dành cho người dùng đã đăng nhập (hỗ trợ lọc theo box)."""
+    user_id = user.get("sub") or user.get("id")
+    if box is not None and box > 0:
+        return await service.start_session_by_box(set_id, box_number=box, user_id=user_id)
     return await service.start_session(set_id, user_id=user_id, is_guest=False)
+
+
+@router.post("/{set_id}/start-box/{box_number}", response_model=FlashcardSessionStartResponse)
+async def start_box_session(
+    set_id: str,
+    box_number: int,
+    user: dict = Depends(get_current_user)
+):
+    """Bắt đầu phiên học flashcard chỉ với các từ trong một Leitner Box cụ thể."""
+    user_id = user.get("sub") or user.get("id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Yêu cầu đăng nhập để học theo Leitner Box.")
+    return await service.start_session_by_box(set_id, box_number=box_number, user_id=user_id)
 
 
 @router.post("/{set_id}/start-guest", response_model=FlashcardSessionStartResponse)

@@ -55,21 +55,33 @@ class FlashcardRepository:
     async def update_repetition_loops(self, boxes: List[int]) -> List[Dict[str, Any]]:
         """
         Cập nhật cấu hình khoảng cách ngày ôn tập (day_repetition) của các box trong Supabase.
+        Chỉ Admin mới có quyền gọi cập nhật này. Áp dụng cho toàn bộ hệ thống.
         """
         if not boxes:
             return await self.get_repetition_loops()
 
         if self.supabase:
             try:
+                # 1. Xóa các loop có loop_order > len(boxes) nếu Admin giảm bớt số lượng box
+                existing = await self.get_repetition_loops()
+                for old_loop in existing:
+                    old_order = old_loop.get("loop_order", 0)
+                    if old_order > len(boxes):
+                        try:
+                            self.supabase.table("repetition_loops").delete().eq("id", old_loop.get("id")).execute()
+                        except Exception as del_err:
+                            logger.warning(f"Error removing excess loop {old_order}: {del_err}")
+
+                # 2. Upsert từng box theo thứ tự
                 for idx, days in enumerate(boxes):
                     loop_order = idx + 1
                     self.supabase.table("repetition_loops").upsert({
                         "loop_order": loop_order,
-                        "day_repetition": int(days),
+                        "day_repetition": max(1, int(days)),
                         "updated_at": datetime.now(timezone.utc).isoformat()
                     }, on_conflict="loop_order").execute()
 
-                # Refresh pointers
+                # 3. Làm mới các con trỏ pre_loop_id và next_loop_id
                 all_loops = await self.get_repetition_loops()
                 for i, loop in enumerate(all_loops):
                     pre_id = all_loops[i - 1]["id"] if i > 0 else None
@@ -635,6 +647,118 @@ class FlashcardRepository:
                 logger.debug(f"Supabase get_user_word_proficiency notice: {e}")
 
         return {"proficiency": 0.0, "leitner_box": 1, "attempts": 0, "correct_count": 0}
+
+    async def get_batch_user_word_proficiency(self, user_id: str, words: List[str]) -> Dict[str, Dict[str, Any]]:
+        """
+        Truy vấn hàng loạt điểm thông thạo và Leitner box của danh sách từ để tối ưu tốc độ tải.
+        Giảm từ N*3 request xuống còn tối đa 3 batch query.
+        """
+        result: Dict[str, Dict[str, Any]] = {}
+        if not words or not self.supabase or not user_id:
+            return result
+
+        clean_words = list(dict.fromkeys(w.strip().lower() for w in words if w and w.strip()))
+        if not clean_words:
+            return result
+
+        try:
+            # 1. Batch fetch word IDs
+            w_res = self.supabase.table("words").select("id, word_text").in_("word_text", clean_words).execute()
+            word_id_to_text: Dict[str, str] = {}
+            word_text_to_id: Dict[str, str] = {}
+            if w_res and w_res.data:
+                for row in w_res.data:
+                    wid = str(row["id"])
+                    wtxt = str(row["word_text"]).strip().lower()
+                    word_id_to_text[wid] = wtxt
+                    word_text_to_id[wtxt] = wid
+
+            word_ids = list(word_id_to_text.keys())
+            if not word_ids:
+                return {w: {"proficiency": 0.0, "leitner_box": 1, "attempts": 0, "correct_count": 0} for w in clean_words}
+
+            # 2. Batch fetch senses
+            s_res = self.supabase.table("senses").select("id, word_id").in_("word_id", word_ids).execute()
+            sense_id_to_word: Dict[str, str] = {}
+            sense_ids: List[str] = []
+            if s_res and s_res.data:
+                for row in s_res.data:
+                    sid = str(row["id"])
+                    wid = str(row.get("word_id"))
+                    wtxt = word_id_to_text.get(wid)
+                    if wtxt and wtxt not in [sense_id_to_word[s] for s in sense_id_to_word]:
+                        sense_id_to_word[sid] = wtxt
+                        sense_ids.append(sid)
+
+            # 3. Batch fetch progress
+            if sense_ids:
+                p_res = self.supabase.table("user_sense_progress").select(
+                    "sense_id, mastery_score, current_repetition_id, wrong_count, translated_count"
+                ).eq("user_id", user_id).in_("sense_id", sense_ids).execute()
+
+                if p_res and p_res.data:
+                    for p in p_res.data:
+                        sid = str(p.get("sense_id"))
+                        wtxt = sense_id_to_word.get(sid)
+                        if wtxt:
+                            result[wtxt] = {
+                                "proficiency": p.get("mastery_score", 0.0),
+                                "leitner_box": p.get("current_repetition_id") or 1,
+                                "attempts": p.get("translated_count", 0) + p.get("wrong_count", 0),
+                                "correct_count": p.get("translated_count", 0),
+                            }
+        except Exception as e:
+            logger.debug(f"get_batch_user_word_proficiency notice: {e}")
+
+        # Điền giá trị mặc định cho các từ chưa có tiến trình
+        for w in clean_words:
+            if w not in result:
+                result[w] = {"proficiency": 0.0, "leitner_box": 1, "attempts": 0, "correct_count": 0}
+
+        return result
+
+    async def get_user_leitner_box_stats(self, user_id: str) -> Dict[str, Any]:
+        """
+        Thống kê các Leitner box và số lượng từ trong mỗi box của user.
+        Bao gồm cả danh sách các box đã cấu hình trong hệ thống (repetition_loops).
+        """
+        loops = await self.get_repetition_loops()
+        configured_boxes = {l.get("loop_order", idx + 1): l.get("day_repetition", 1) for idx, l in enumerate(loops)}
+        if not configured_boxes:
+            configured_boxes = {1: 1, 2: 2, 3: 5, 4: 8, 5: 14}
+
+        box_counts: Dict[str, int] = {str(box): 0 for box in configured_boxes.keys()}
+        total_words = 0
+
+        if self.supabase and user_id:
+            try:
+                res = self.supabase.table("user_sense_progress").select(
+                    "current_repetition_id"
+                ).eq("user_id", user_id).execute()
+
+                if res and res.data:
+                    for row in res.data:
+                        box_num = row.get("current_repetition_id") or 1
+                        box_key = str(box_num)
+                        box_counts[box_key] = box_counts.get(box_key, 0) + 1
+                        total_words += 1
+            except Exception as e:
+                logger.debug(f"get_user_leitner_box_stats notice: {e}")
+
+        box_details = []
+        for box_num, day_rep in sorted(configured_boxes.items()):
+            b_key = str(box_num)
+            box_details.append({
+                "box": box_num,
+                "day_repetition": day_rep,
+                "count": box_counts.get(b_key, 0)
+            })
+
+        return {
+            "total_words": total_words,
+            "boxes": box_counts,
+            "box_details": box_details
+        }
 
     async def update_user_word_proficiency(
         self,

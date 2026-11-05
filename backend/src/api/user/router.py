@@ -75,6 +75,39 @@ async def get_user_profile(
     except Exception as e:
         logger.debug(f"Count words notice: {e}")
 
+    # 3. Thống kê các Leitner box và số lượng từ trong mỗi box của user (Spaced Repetition)
+    leitner_box_stats: Dict[str, int] = {}
+    box_details: List[Dict[str, Any]] = []
+    total_leitner_words = 0
+    try:
+        loop_res = client.table("repetition_loops").select("loop_order, day_repetition").order("loop_order").execute()
+        configured_boxes: Dict[int, int] = {}
+        if loop_res and loop_res.data:
+            configured_boxes = {l.get("loop_order", idx + 1): l.get("day_repetition", 1) for idx, l in enumerate(loop_res.data)}
+        if not configured_boxes:
+            configured_boxes = {1: 1, 2: 2, 3: 5, 4: 8, 5: 14}
+
+        box_counts = {str(b): 0 for b in configured_boxes.keys()}
+
+        prog_res = client.table("user_sense_progress").select("current_repetition_id").eq("user_id", user_id).execute()
+        if prog_res and prog_res.data:
+            for row in prog_res.data:
+                b_num = row.get("current_repetition_id") or 1
+                b_key = str(b_num)
+                box_counts[b_key] = box_counts.get(b_key, 0) + 1
+                total_leitner_words += 1
+
+        for box_num, day_rep in sorted(configured_boxes.items()):
+            b_key = str(box_num)
+            box_details.append({
+                "box": box_num,
+                "day_repetition": day_rep,
+                "count": box_counts.get(b_key, 0)
+            })
+        leitner_box_stats = box_counts
+    except Exception as e:
+        logger.debug(f"Count leitner boxes notice: {e}")
+
     return {
         "id": user_id,
         "username": prof_data.get("user_name") or user.get("email", "").split("@")[0],
@@ -84,7 +117,10 @@ async def get_user_profile(
         "created_at": prof_data.get("created_at"),
         "total_words_encountered": total_words_encountered,
         "total_words_translated": total_words_translated,
-        "unique_words_count": unique_words_count
+        "unique_words_count": unique_words_count,
+        "leitner_box_stats": leitner_box_stats,
+        "leitner_box_details": box_details,
+        "total_leitner_words": total_leitner_words
     }
 
 

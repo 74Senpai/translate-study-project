@@ -17,6 +17,7 @@ import {
   Sparkles,
   RefreshCw,
   SlidersHorizontal,
+  Layers,
 } from "lucide-react";
 import Header from "@/components/layout/Header";
 import Footer from "@/components/layout/Footer";
@@ -51,6 +52,13 @@ export default function MyProfilePage() {
     encountered_count: 1,
     translated_count: 1,
   });
+
+  // Leitner Box Stats
+  const [leitnerStats, setLeitnerStats] = useState(null);
+
+  // Dynamic Flashcard Set for box sessions
+  const [dynamicSetId, setDynamicSetId] = useState(null);
+  const [startingBox, setStartingBox] = useState(null);
 
   // Toast feedback
   const [toast, setToast] = useState(null);
@@ -98,10 +106,57 @@ export default function MyProfilePage() {
     }
   };
 
+  const fetchLeitnerStats = async () => {
+    try {
+      const { data } = await axiosInstance.get("/flashcards/user-leitner-stats");
+      setLeitnerStats(data);
+    } catch (err) {
+      console.debug("Leitner stats notice:", err);
+    }
+  };
+
+  const fetchDynamicSet = async () => {
+    try {
+      const { data } = await axiosInstance.get("/flashcards");
+      const dynSet = (data || []).find((s) => s.set_type === "user_dynamic");
+      if (dynSet) {
+        setDynamicSetId(dynSet.id);
+      }
+    } catch (err) {
+      console.debug("Fetch dynamic set notice:", err);
+    }
+  };
+
+  const handleStartBoxSession = async (boxNumber) => {
+    setStartingBox(boxNumber);
+    try {
+      let targetSetId = dynamicSetId;
+      if (!targetSetId) {
+        const { data } = await axiosInstance.post("/flashcards/init", {
+          mode: "user_dynamic",
+          title: "Bộ Thẻ Cá Nhân Hóa (User Data Leitner SRS)",
+          description: "Bộ thẻ tạo câu hỏi động từ kho từ vựng và lịch sử dịch của bạn, tự động ưu tiên ôn tập theo Leitner Box.",
+          is_public: false,
+          total_cards: 20,
+        });
+        targetSetId = data.id;
+        setDynamicSetId(targetSetId);
+      }
+      navigate(`/flashcards/play/${targetSetId}?box=${boxNumber}`);
+    } catch (err) {
+      console.error("Start box session error:", err);
+      showToast(err.response?.data?.detail || "Không thể bắt đầu phiên học cho box này.", "error");
+    } finally {
+      setStartingBox(null);
+    }
+  };
+
   useEffect(() => {
     if (isAuthenticated) {
       fetchProfile();
       fetchWords();
+      fetchLeitnerStats();
+      fetchDynamicSet();
     }
   }, [isAuthenticated, wordsSort]);
 
@@ -400,6 +455,124 @@ export default function MyProfilePage() {
                 {profile.unique_words_count || words.length}
               </span>
             </div>
+          </div>
+
+          {/* Quick Leitner Box Badges */}
+          <div className="w-full pt-4 mt-2 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-3">
+            <div className="flex items-center gap-2 text-xs font-bold text-slate-500">
+              <Layers className="w-4 h-4 text-indigo-600 shrink-0" />
+              <span>Hệ thống Leitner Boxes (Spaced Repetition):</span>
+              <span className="bg-indigo-100 text-indigo-800 text-[10px] font-black px-2 py-0.5 rounded-full">
+                {leitnerStats?.total_words ?? profile?.total_leitner_words ?? 0} từ đang theo dõi
+              </span>
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5">
+              {[1, 2, 3, 4, 5].map((b) => {
+                const count = (leitnerStats?.boxes || profile?.leitner_box_stats)?.[String(b)] || 0;
+                const colors = [
+                  "bg-rose-50 text-rose-700 border-rose-200",
+                  "bg-orange-50 text-orange-700 border-orange-200",
+                  "bg-amber-50 text-amber-700 border-amber-200",
+                  "bg-emerald-50 text-emerald-700 border-emerald-200",
+                  "bg-indigo-50 text-indigo-700 border-indigo-200",
+                ];
+                return (
+                  <span
+                    key={b}
+                    className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-xl border text-[11px] font-black ${colors[b - 1]}`}
+                  >
+                    <span>Box {b}:</span>
+                    <span>{count} từ</span>
+                  </span>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
+        {/* Section: Chọn Leitner Box để làm Flashcard */}
+        <div className="bg-gradient-to-br from-indigo-900/5 via-purple-900/5 to-slate-50 rounded-[2rem] border border-indigo-100 p-6 md:p-8">
+          <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 mb-6">
+            <div>
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-indigo-600 text-white flex items-center justify-center">
+                  <Layers className="w-4 h-4" />
+                </div>
+                <h2 className="text-xl font-black text-slate-800 m-0">
+                  Luyện tập Flashcard theo từng Leitner Box
+                </h2>
+              </div>
+              <p className="text-xs text-slate-500 font-medium mt-1.5 m-0">
+                Chọn box cụ thể để bắt đầu bài học flashcard tự động tạo từ kho từ của bạn. Thẻ và câu hỏi tuân thủ theo thuật toán Spaced Repetition.
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+            {[
+              { box: 1, days: 1, label: "Hằng ngày", desc: "Từ mới & hay quên" },
+              { box: 2, days: 2, label: "Mỗi 2 ngày", desc: "Bắt đầu ghi nhớ" },
+              { box: 3, days: 5, label: "Mỗi 5 ngày", desc: "Khá thành thạo" },
+              { box: 4, days: 8, label: "Mỗi 8 ngày", desc: "Gần làm chủ" },
+              { box: 5, days: 14, label: "Mỗi 14 ngày", desc: "Làm chủ hoàn toàn" },
+            ].map(({ box, days, label, desc }) => {
+              const count = (leitnerStats?.boxes || profile?.leitner_box_stats)?.[String(box)] || 0;
+              const hasWords = count > 0;
+              const gradients = [
+                "from-rose-500 to-red-600",
+                "from-orange-500 to-amber-600",
+                "from-amber-500 to-yellow-600",
+                "from-emerald-500 to-teal-600",
+                "from-indigo-500 to-purple-600",
+              ];
+              const grad = gradients[box - 1];
+
+              return (
+                <div
+                  key={box}
+                  className="bg-white rounded-3xl p-5 border border-slate-200/80 shadow-sm hover:shadow-md transition-all flex flex-col justify-between group relative overflow-hidden"
+                >
+                  <div className="flex items-start justify-between mb-3">
+                    <div className={`w-11 h-11 rounded-2xl bg-gradient-to-br ${grad} text-white font-black text-lg flex items-center justify-center shadow-md shadow-slate-200`}>
+                      {box}
+                    </div>
+                    <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 bg-slate-50 px-2 py-1 rounded-lg border border-slate-100">
+                      {label}
+                    </span>
+                  </div>
+
+                  <div>
+                    <h3 className="text-base font-black text-slate-800 m-0">Box {box}</h3>
+                    <p className="text-[11px] text-slate-400 font-medium m-0 mt-0.5">{desc}</p>
+                    <div className="mt-3 flex items-baseline gap-1.5">
+                      <span className="text-2xl font-black text-slate-900">{count}</span>
+                      <span className="text-xs font-bold text-slate-400">từ vựng</span>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={() => handleStartBoxSession(box)}
+                    disabled={startingBox === box || !hasWords}
+                    className={`mt-4 w-full py-2.5 px-3 rounded-2xl text-xs font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:cursor-not-allowed ${
+                      hasWords
+                        ? "bg-slate-900 hover:bg-indigo-600 text-white shadow-sm active:scale-95"
+                        : "bg-slate-100 text-slate-400 opacity-60"
+                    }`}
+                  >
+                    {startingBox === box ? (
+                      <span>Đang tải...</span>
+                    ) : hasWords ? (
+                      <>
+                        <span>Học Box {box}</span>
+                        <span className="text-[10px] opacity-75">→</span>
+                      </>
+                    ) : (
+                      <span>Chưa có từ</span>
+                    )}
+                  </button>
+                </div>
+              );
+            })}
           </div>
         </div>
 
