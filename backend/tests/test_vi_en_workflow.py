@@ -37,7 +37,8 @@ async def test_full_vi_en_workflow():
 
     req = TranslateRequest(
         source=TranslateMode(source_lang="vi", target_lang="en"),
-        text="Tôi đang xây dựng một ứng dụng trí tuệ nhân tạo để phát triển ngôn ngữ."
+        text="Tôi đang xây dựng một ứng dụng trí tuệ nhân tạo để phát triển ngôn ngữ.",
+        option={"analysis": True, "vocab": True, "stats": True}
     )
 
     responses = []

@@ -22,7 +22,8 @@ def test_openapi_json():
 def test_translate_json_endpoint():
     payload = {
         "source": {"source_lang": "en", "target_lang": "vi"},
-        "text": "The engineer is designing a smart software architecture."
+        "text": "The engineer is designing a smart software architecture.",
+        "option": {"analysis": True, "vocab": True, "stats": True}
     }
     response = client.post("/api/v1/translate/", json=payload)
     assert response.status_code == 200

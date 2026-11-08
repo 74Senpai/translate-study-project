@@ -26,11 +26,54 @@ export default function TranslateResult({
   // Check if we are in the middle of a "Full" analysis (Dual-stage)
   const isPendingFull = isLoading && (apiData?.pos_tags?.length || 0) === 0;
 
-  const handleCopy = () => {
-    if (!apiData?.translated_text) return;
-    navigator.clipboard.writeText(apiData.translated_text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  const handleCopy = async () => {
+    let textToCopy =
+      apiData?.data?.translated_text ||
+      apiData?.translated_text ||
+      "";
+
+    if (!textToCopy && apiData?.pos_tags?.length > 0) {
+      textToCopy = apiData.pos_tags.map((t) => t.text).join(" ");
+    }
+
+    if (!textToCopy) return;
+
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(textToCopy);
+      } else {
+        const textArea = document.createElement("textarea");
+        textArea.value = textToCopy;
+        textArea.style.position = "fixed";
+        textArea.style.left = "-999999px";
+        textArea.style.top = "-999999px";
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        document.execCommand("copy");
+        textArea.remove();
+      }
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.warn("navigator.clipboard failed, attempting execCommand fallback:", err);
+      try {
+        const textArea = document.createElement("textarea");
+        textArea.value = textToCopy;
+        textArea.style.position = "fixed";
+        textArea.style.left = "-999999px";
+        textArea.style.top = "-999999px";
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        document.execCommand("copy");
+        textArea.remove();
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      } catch (fallbackErr) {
+        console.error("All copy methods failed:", fallbackErr);
+      }
+    }
   };
 
   return (

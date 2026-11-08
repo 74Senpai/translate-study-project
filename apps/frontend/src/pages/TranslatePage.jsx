@@ -4,6 +4,7 @@ import Header from "@/components/layout/Header";
 import Footer from "@/components/layout/Footer";
 import TranslateInput from "@/components/translate/TranslateInput";
 import TranslateResult from "@/components/translate/TranslateResult";
+import BackendTypoBanner from "@/components/translate/BackendTypoBanner";
 // import SvoStructure from "@/components/translate/SvoStructure";
 import PosSidebar from "@/components/translate/PosSidebar";
 import SentenceAnalysis from "@/components/translate/SentenceAnalysis";
@@ -16,6 +17,7 @@ import {
   LayoutDashboard,
   Puzzle,
   Zap,
+  Wand2,
 } from "lucide-react";
 
 export default function TranslatePage() {
@@ -26,10 +28,15 @@ export default function TranslatePage() {
     changeMode,
     apiData,
     analysisData,
+    backendTypoWords,
+    confirmBackendTypo,
+    cancelBackendTypo,
     showResultDetails,
     setShowResultDetails,
     showAnalysis,
     setShowAnalysis,
+    showTypoSuggestions,
+    setShowTypoSuggestions,
     isLoading,
     isVocabLoading,
     error,
@@ -70,7 +77,18 @@ export default function TranslatePage() {
             onChange={setInputText}
             onClear={clearInput}
             isLoading={isLoading}
+            showTypoSuggestions={showTypoSuggestions}
           />
+
+          {/* Backend Typo Banner - "Bản dịch cho văn bản thay thế" */}
+          {showTypoSuggestions && backendTypoWords.length > 0 && (
+            <BackendTypoBanner
+              originalText={inputText}
+              typoWords={backendTypoWords}
+              onConfirm={confirmBackendTypo}
+              onCancel={cancelBackendTypo}
+            />
+          )}
 
           {/* Error banner */}
           {error && (
@@ -122,6 +140,24 @@ export default function TranslatePage() {
               </label>
             </div>
             <div className="flex flex-col gap-2">
+              <button
+                onClick={() => setShowTypoSuggestions(!showTypoSuggestions)}
+                className={`flex items-center justify-between px-5 py-4 rounded-3xl text-[0.8rem] font-black transition-all active:scale-[0.98] border ${
+                  showTypoSuggestions
+                    ? "bg-amber-500 text-white border-amber-500 shadow-xl shadow-amber-200"
+                    : "bg-white text-slate-500 border-slate-100 hover:bg-amber-50/50 hover:text-amber-600 hover:border-amber-100"
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <Wand2 className="w-4 h-4" />
+                  <span>Gợi ý sửa chính tả</span>
+                </div>
+                {showTypoSuggestions ? (
+                  <Eye className="w-4 h-4" />
+                ) : (
+                  <EyeOff className="w-4 h-4 opacity-30" />
+                )}
+              </button>
               <button
                 onClick={() => setShowResultDetails(!showResultDetails)}
                 className={`flex items-center justify-between px-5 py-4 rounded-3xl text-[0.8rem] font-black transition-all active:scale-[0.98] border ${

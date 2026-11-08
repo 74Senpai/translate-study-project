@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { translate } from "@/services/translateApi";
 import { POS_REFERENCE } from "@/constants/pos";
 import { useAuth } from "@/hooks/useAuth";
+import { replaceWordInText } from "@/utils/text";
 
 const DEBOUNCE_MS = 600;
 
@@ -13,6 +14,7 @@ const DEBOUNCE_MS = 600;
  *  - mode / setMode            — { source_lang, target_lang } as JSON string
  *  - apiData                   — accumulated stream data { data, pos_tags, vocabularies }
  *  - analysisData              — list of sentence grammar analysis items
+ *  - typoData                  — list of typo suggestions { origin_text, correction, candidates }
  *  - isLoading                 — true while request in flight
  *  - isVocabLoading            — true while waiting for VOCAB event
  *  - error                     — error message string | null
@@ -36,6 +38,8 @@ export function useTranslate() {
   const [isVocabLoading, setIsVocabLoading] = useState(false);
   const [error, setError] = useState(null);
   const [analysisData, setAnalysisData] = useState(null);
+  const [typoData, setTypoData] = useState([]);
+  const [backendTypoWords, setBackendTypoWords] = useState([]);
 
   // Persistence for UI settings
   const [showResultDetails, setShowResultDetails] = useState(() => {
@@ -45,6 +49,11 @@ export function useTranslate() {
 
   const [showAnalysis, setShowAnalysis] = useState(() => {
     const saved = localStorage.getItem("setting_show_analysis");
+    return saved !== null ? JSON.parse(saved) : true;
+  });
+
+  const [showTypoSuggestions, setShowTypoSuggestions] = useState(() => {
+    const saved = localStorage.getItem("setting_show_typo_suggestions");
     return saved !== null ? JSON.parse(saved) : true;
   });
 
@@ -64,6 +73,13 @@ export function useTranslate() {
   }, [showAnalysis]);
 
   useEffect(() => {
+    localStorage.setItem(
+      "setting_show_typo_suggestions",
+      JSON.stringify(showTypoSuggestions),
+    );
+  }, [showTypoSuggestions]);
+
+  useEffect(() => {
     localStorage.setItem("setting_translate_mode", mode);
   }, [mode]);
 
@@ -80,57 +96,89 @@ export function useTranslate() {
   // AbortController ref to cancel in-flight requests
   const controllerRef = useRef(null);
 
-  const handleTranslate = useCallback(async (text, currentMode) => {
-    if (!text.trim()) {
-      setApiData(null);
-      setAnalysisData(null);
+  const handleTranslate = useCallback(
+    async (text, currentMode, customOptions = null) => {
+      if (!text.trim()) {
+        setApiData(null);
+        setAnalysisData(null);
+        setTypoData([]);
+        setBackendTypoWords([]);
+        setError(null);
+        setIsVocabLoading(false);
+        return;
+      }
+
+      const activeOptions = customOptions || {
+        translate: true,
+        analysis: Boolean(showAnalysis),
+        vocab: Boolean(showResultDetails),
+        typo: Boolean(showTypoSuggestions),
+        stats: true,
+      };
+
+      setIsLoading(true);
+      setIsVocabLoading(Boolean(activeOptions.vocab));
       setError(null);
-      setIsVocabLoading(false);
-      return;
-    }
 
-    setIsLoading(true);
-    setIsVocabLoading(true);
-    setError(null);
+      // Cancel any previous request
+      if (controllerRef.current) {
+        controllerRef.current.abort();
+      }
+      controllerRef.current = new AbortController();
 
-    // Cancel any previous request
-    if (controllerRef.current) {
-      controllerRef.current.abort();
-    }
-    controllerRef.current = new AbortController();
-
-    // Accumulators for streaming data
-    let accumApiData = {
-      data: {
-        original_text: text,
+      // Accumulators for streaming data
+      let accumApiData = {
         translated_text: "",
-        source_lang: currentMode?.source_lang || "vi",
-      },
-      pos_tags: [],
-      vocabularies: [],
-    };
-    let accumAnalysis = [];
+        data: {
+          original_text: text,
+          translated_text: "",
+          source_lang: currentMode?.source_lang || "vi",
+        },
+        pos_tags: [],
+        vocabularies: [],
+      };
+      let accumAnalysis = [];
+      let accumTypos = [];
+      setTypoData([]);
+      setBackendTypoWords([]);
 
-    try {
-      for await (const message of translate(
-        text,
-        currentMode,
-        controllerRef.current.signal,
-        { analysis: true },
-      )) {
+      try {
+        for await (const message of translate(
+          text,
+          currentMode,
+          controllerRef.current.signal,
+          activeOptions,
+        )) {
         if (!message) continue;
 
         const { type_response, data } = message;
 
-        if (type_response === "TRANSLATE" && data) {
+        if (type_response === "TYPO" && data) {
+          if (data.words && Array.isArray(data.words)) {
+            accumTypos = [...accumTypos, ...data.words];
+            const seen = new Set();
+            const uniqueTypos = [];
+            for (const w of accumTypos) {
+              const key = (w.origin_text || "").toLowerCase();
+              if (!seen.has(key)) {
+                seen.add(key);
+                uniqueTypos.push(w);
+              }
+            }
+            setTypoData(uniqueTypos);
+            setBackendTypoWords(uniqueTypos);
+          }
+        } else if (type_response === "TRANSLATE" && data) {
           // Update translation text progressively
+          const newTranslatedText =
+            data.translated_text || accumApiData.data?.translated_text || accumApiData.translated_text || "";
           accumApiData = {
             ...accumApiData,
+            translated_text: newTranslatedText,
             data: {
               ...accumApiData.data,
               ...data,
-              translated_text:
-                data.translated_text || accumApiData.data.translated_text,
+              translated_text: newTranslatedText,
             },
           };
           setApiData({ ...accumApiData });
@@ -149,6 +197,7 @@ export function useTranslate() {
             }));
             accumApiData = {
               ...accumApiData,
+              structure: data.structure || accumApiData.structure,
               pos_tags: [
                 ...accumApiData.pos_tags,
                 ...mappedPosTags,
@@ -159,21 +208,29 @@ export function useTranslate() {
 
           // Build SentenceAnalysis items
           if (data.sentence_info) {
+            const rawTense = data.sentence_info.tense;
+            const tenseVal = (!rawTense || rawTense === "Unknown") ? "Không xác định" : rawTense;
+
+            const rawComplexity = data.sentence_info.complexity;
+            const complexityVal = (!rawComplexity || rawComplexity === "Unknown") ? "Không xác định" : rawComplexity;
+
+            const rawVoice = data.sentence_info.voice;
+            const voiceVal = (!rawVoice || rawVoice === "Unknown") ? "unknown" : rawVoice.toLowerCase();
+
             const analysisItem = {
               sentence: data.original_text || text,
               tense: {
-                tense: data.sentence_info.tense || "Present Simple",
+                tense: tenseVal,
                 signal_words: [],
               },
-              sentence_types: data.sentence_info.complexity
-                ? [{ type: data.sentence_info.complexity, signal_words: [] }]
-                : [],
-              voice: (data.sentence_info.voice || "Active").toLowerCase(),
+              sentence_types: [{ type: complexityVal, signal_words: [] }],
+              voice: voiceVal,
               is_negative:
                 data.sentence_info.rule_explanation?.toLowerCase().includes("phủ định") ||
                 false,
               is_question: data.sentence_info.form_type === "Interrogative",
               rule_explanation: data.sentence_info.rule_explanation,
+              structure: data.structure,
             };
             accumAnalysis = [...accumAnalysis, analysisItem];
             setAnalysisData([...accumAnalysis]);
@@ -222,21 +279,30 @@ export function useTranslate() {
       setIsLoading(false);
       setIsVocabLoading(false);
     }
-  }, []);
+  }, [showAnalysis, showResultDetails, showTypoSuggestions]);
 
-  // Debounced auto-translate on input/mode change
+  // Debounced auto-translate on input, mode, or option change
   useEffect(() => {
     const timer = setTimeout(
       () => handleTranslate(inputText, JSON.parse(mode)),
       DEBOUNCE_MS,
     );
     return () => clearTimeout(timer);
-  }, [inputText, mode, handleTranslate]);
+  }, [
+    inputText,
+    mode,
+    showAnalysis,
+    showResultDetails,
+    showTypoSuggestions,
+    handleTranslate,
+  ]);
 
   const clearInput = useCallback(() => {
     setInputText("");
     setApiData(null);
     setAnalysisData(null);
+    setTypoData([]);
+    setBackendTypoWords([]);
     setError(null);
     setIsVocabLoading(false);
   }, []);
@@ -246,9 +312,59 @@ export function useTranslate() {
     setInputText("");
     setApiData(null);
     setAnalysisData(null);
+    setTypoData([]);
+    setBackendTypoWords([]);
     setError(null);
     setIsVocabLoading(false);
   }, []);
+
+  const applyTypoSuggestion = useCallback((originText, replacementWord) => {
+    setInputText((prev) => replaceWordInText(prev, originText, replacementWord));
+    setTypoData((prev) =>
+      prev.filter(
+        (item) => item.origin_text.toLowerCase() !== originText.toLowerCase()
+      )
+    );
+  }, []);
+
+  const applyAllTypoSuggestions = useCallback(() => {
+    setInputText((prev) => {
+      let updated = prev;
+      typoData.forEach((item) => {
+        updated = replaceWordInText(updated, item.origin_text, item.correction);
+      });
+      return updated;
+    });
+    setTypoData([]);
+    setBackendTypoWords([]);
+  }, [typoData]);
+
+  const dismissTypoSuggestion = useCallback((originText) => {
+    setTypoData((prev) =>
+      prev.filter(
+        (item) => item.origin_text.toLowerCase() !== originText.toLowerCase()
+      )
+    );
+  }, []);
+
+  const confirmBackendTypo = useCallback((correctedText) => {
+    setInputText(correctedText);
+    setBackendTypoWords([]);
+    setTypoData([]);
+  }, []);
+
+  const cancelBackendTypo = useCallback(() => {
+    setBackendTypoWords([]);
+    setTypoData([]);
+    // Tiến hành dịch mà không có typo
+    handleTranslate(inputText, JSON.parse(mode), {
+      translate: true,
+      analysis: Boolean(showAnalysis),
+      vocab: Boolean(showResultDetails),
+      typo: false,
+      stats: true,
+    });
+  }, [inputText, mode, showAnalysis, showResultDetails, handleTranslate]);
 
   return {
     inputText,
@@ -257,10 +373,19 @@ export function useTranslate() {
     changeMode,
     apiData,
     analysisData,
+    typoData,
+    backendTypoWords,
+    confirmBackendTypo,
+    cancelBackendTypo,
     showResultDetails,
     setShowResultDetails,
     showAnalysis,
     setShowAnalysis,
+    showTypoSuggestions,
+    setShowTypoSuggestions,
+    applyTypoSuggestion,
+    applyAllTypoSuggestions,
+    dismissTypoSuggestion,
     isLoading,
     isVocabLoading,
     error,

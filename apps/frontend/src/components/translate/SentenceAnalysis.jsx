@@ -73,19 +73,25 @@ export default function SentenceAnalysis({
                       Thì (Tense)
                     </span>
                     <div className="flex items-center gap-2">
-                      {SLUG_MAPPING[item.tense.tense] ? (
-                        <Link
-                          to={`/library/topic/${SLUG_MAPPING[item.tense.tense]}`}
-                          className="px-3 py-1 bg-blue-50 text-blue-600 rounded-xl text-sm font-bold hover:bg-blue-100 transition-colors no-underline border border-blue-100"
-                        >
-                          {item.tense.tense}
-                        </Link>
+                      {item.tense.tense && item.tense.tense !== "Không xác định" && item.tense.tense !== "Unknown" ? (
+                        SLUG_MAPPING[item.tense.tense] ? (
+                          <Link
+                            to={`/library/topic/${SLUG_MAPPING[item.tense.tense]}`}
+                            className="px-3 py-1 bg-blue-50 text-blue-600 rounded-xl text-sm font-bold hover:bg-blue-100 transition-colors no-underline border border-blue-100"
+                          >
+                            {item.tense.tense}
+                          </Link>
+                        ) : (
+                          <span className="px-3 py-1 bg-blue-50 text-blue-600 rounded-xl text-sm font-bold border border-blue-100">
+                            {item.tense.tense}
+                          </span>
+                        )
                       ) : (
-                        <span className="px-3 py-1 bg-blue-50 text-blue-600 rounded-xl text-sm font-bold border border-blue-100">
-                          {item.tense.tense}
+                        <span className="px-3 py-1 bg-slate-100 text-slate-500 rounded-xl text-sm font-semibold border border-slate-200">
+                          Không xác định
                         </span>
                       )}
-                      {item.tense.signal_words.length > 0 && (
+                      {item.tense.signal_words?.length > 0 && (
                         <span className="text-[0.7rem] text-slate-500 italic">
                           (Nhận biết: {item.tense.signal_words.join(", ")})
                         </span>
@@ -100,27 +106,34 @@ export default function SentenceAnalysis({
                         Loại câu
                       </span>
                       <div className="flex flex-wrap gap-2">
-                        {item.sentence_types.map((type, tIdx) => (
-                          <div key={tIdx} className="flex flex-col">
-                            {SLUG_MAPPING[type.type] ? (
-                              <Link
-                                to={`/library/topic/${SLUG_MAPPING[type.type]}`}
-                                className="px-3 py-1 bg-purple-50 text-purple-600 rounded-xl text-sm font-bold hover:bg-purple-100 transition-colors no-underline self-start border border-purple-100"
-                              >
-                                {type.type}
-                              </Link>
-                            ) : (
-                              <span className="px-3 py-1 bg-purple-50 text-purple-600 rounded-xl text-sm font-bold border border-purple-100 self-start">
-                                {type.type}
-                              </span>
-                            )}
-                            {type.signal_words.length > 0 && (
-                              <span className="text-[0.7rem] text-slate-500 italic mt-0.5">
-                                (Nhận biết: {type.signal_words.join(", ")})
-                              </span>
-                            )}
-                          </div>
-                        ))}
+                        {item.sentence_types.map((type, tIdx) => {
+                          const isUnknown = !type.type || type.type === "Không xác định" || type.type === "Unknown";
+                          return (
+                            <div key={tIdx} className="flex flex-col">
+                              {isUnknown ? (
+                                <span className="px-3 py-1 bg-slate-100 text-slate-500 rounded-xl text-sm font-semibold border border-slate-200 self-start">
+                                  Không xác định
+                                </span>
+                              ) : SLUG_MAPPING[type.type] ? (
+                                <Link
+                                  to={`/library/topic/${SLUG_MAPPING[type.type]}`}
+                                  className="px-3 py-1 bg-purple-50 text-purple-600 rounded-xl text-sm font-bold hover:bg-purple-100 transition-colors no-underline self-start border border-purple-100"
+                                >
+                                  {type.type}
+                                </Link>
+                              ) : (
+                                <span className="px-3 py-1 bg-purple-50 text-purple-600 rounded-xl text-sm font-bold border border-purple-100 self-start">
+                                  {type.type}
+                                </span>
+                              )}
+                              {type.signal_words?.length > 0 && (
+                                <span className="text-[0.7rem] text-slate-500 italic mt-0.5">
+                                  (Nhận biết: {type.signal_words.join(", ")})
+                                </span>
+                              )}
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
                   )}
@@ -130,6 +143,16 @@ export default function SentenceAnalysis({
                     {item.voice === "passive" && (
                       <span className="px-2.5 py-0.5 bg-amber-50 text-amber-700 rounded-full text-[0.7rem] font-black uppercase border border-amber-200">
                         Bị động (Passive)
+                      </span>
+                    )}
+                    {item.voice === "active" && (
+                      <span className="px-2.5 py-0.5 bg-teal-50 text-teal-700 rounded-full text-[0.7rem] font-black uppercase border border-teal-200">
+                        Chủ động (Active)
+                      </span>
+                    )}
+                    {(item.voice === "unknown" || !item.voice) && (
+                      <span className="px-2.5 py-0.5 bg-slate-100 text-slate-500 rounded-full text-[0.7rem] font-bold uppercase border border-slate-200">
+                        Thể: Không xác định
                       </span>
                     )}
                     {item.is_negative && (
@@ -143,6 +166,52 @@ export default function SentenceAnalysis({
                       </span>
                     )}
                   </div>
+
+                  {/* Cấu trúc ngữ pháp */}
+                  {item.structure && (
+                    <div className="mt-2 pt-3 border-t border-slate-100 flex flex-col gap-2 md:col-span-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[0.65rem] text-slate-400 uppercase font-extrabold">
+                          Cấu trúc ngữ pháp
+                        </span>
+                        <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold border ${
+                          item.structure.is_valid && item.structure.pattern !== "Không xác định"
+                            ? "bg-indigo-50 text-indigo-700 border-indigo-200"
+                            : "bg-slate-100 text-slate-500 border-slate-200"
+                        }`}>
+                          {item.structure.pattern || "Không xác định"}
+                        </span>
+                      </div>
+                      {item.structure.is_valid && (item.structure.subject || item.structure.verb || item.structure.object) ? (
+                        <div className="grid grid-cols-3 gap-2 mt-1">
+                          <div className="bg-slate-50 p-2.5 rounded-xl text-center">
+                            <span className="block text-[0.6rem] text-slate-400 uppercase font-bold mb-0.5">Chủ ngữ (S)</span>
+                            <span className="text-xs font-semibold text-slate-800 break-words">{item.structure.subject || "—"}</span>
+                          </div>
+                          <div className="bg-slate-50 p-2.5 rounded-xl text-center">
+                            <span className="block text-[0.6rem] text-slate-400 uppercase font-bold mb-0.5">Động từ (V)</span>
+                            <span className="text-xs font-semibold text-blue-600 break-words">{item.structure.verb || "—"}</span>
+                          </div>
+                          <div className="bg-slate-50 p-2.5 rounded-xl text-center">
+                            <span className="block text-[0.6rem] text-slate-400 uppercase font-bold mb-0.5">Tân ngữ / Bổ ngữ (O/C)</span>
+                            <span className="text-xs font-semibold text-slate-800 break-words">{item.structure.object || item.structure.complement || "—"}</span>
+                          </div>
+                        </div>
+                      ) : !item.structure.is_valid ? (
+                        <p className="text-xs text-slate-400 italic bg-slate-50 p-2 rounded-xl text-center">
+                          Không khớp cấu trúc câu hoàn chỉnh (cụm từ hoặc thành phần khuyết thiếu).
+                        </p>
+                      ) : null}
+                    </div>
+                  )}
+
+                  {/* Rule explanation */}
+                  {item.rule_explanation && (
+                    <div className="mt-1 text-xs text-slate-500 italic md:col-span-2 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+                      <span className="font-semibold text-slate-600 not-italic">Chi tiết nhận diện: </span>
+                      {item.rule_explanation}
+                    </div>
+                  )}
                 </div>
               </div>
             ))}

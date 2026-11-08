@@ -103,7 +103,8 @@ async def test_full_en_vi_workflow():
 
     req = TranslateRequest(
         source=TranslateMode(source_lang="en", target_lang="vi"),
-        text="The team is developing an advance algorithm to process language."
+        text="The team is developing an advance algorithm to process language.",
+        option={"analysis": True, "vocab": True, "stats": True, "typo": True}
     )
 
     responses = []

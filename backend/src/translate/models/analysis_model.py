@@ -8,6 +8,7 @@ class SentenceFormType(str, Enum):
     INTERROGATIVE = "Interrogative"     # Câu hỏi
     IMPERATIVE = "Imperative"           # Câu mệnh lệnh
     EXCLAMATORY = "Exclamatory"         # Câu cảm thán
+    UNKNOWN = "Unknown"                 # Không xác định
 
 
 class SentenceComplexity(str, Enum):
@@ -15,11 +16,13 @@ class SentenceComplexity(str, Enum):
     COMPOUND = "Compound"               # Câu ghép
     COMPLEX = "Complex"                 # Câu phức
     COMPOUND_COMPLEX = "Compound-Complex"
+    UNKNOWN = "Unknown"                 # Không xác định
 
 
 class SentenceVoice(str, Enum):
     ACTIVE = "Active"                   # Câu chủ động
     PASSIVE = "Passive"                 # Câu bị động
+    UNKNOWN = "Unknown"                 # Không xác định
 
 
 class SentenceTense(str, Enum):
@@ -40,9 +43,13 @@ class SentenceTense(str, Enum):
 
 
 class SentenceStructure(BaseModel):
+    pattern: str = "Không xác định"
+    is_valid: bool = False
     subject: Optional[str] = None
     verb: Optional[str] = None
     object: Optional[str] = None
+    indirect_object: Optional[str] = None
+    complement: Optional[str] = None
     clauses: List[str] = []
 
 
@@ -65,11 +72,11 @@ class AnalysisToken(BaseModel):
 
 
 class SentenceAnalysisInfo(BaseModel):
-    form_type: SentenceFormType = SentenceFormType.DECLARATIVE
-    complexity: SentenceComplexity = SentenceComplexity.SIMPLE
-    voice: SentenceVoice = SentenceVoice.ACTIVE
-    tense: SentenceTense = SentenceTense.PRESENT_SIMPLE
-    rule_explanation: Optional[str] = None
+    form_type: SentenceFormType = SentenceFormType.UNKNOWN
+    complexity: SentenceComplexity = SentenceComplexity.UNKNOWN
+    voice: SentenceVoice = SentenceVoice.UNKNOWN
+    tense: SentenceTense = SentenceTense.UNKNOWN
+    rule_explanation: Optional[str] = "Không xác định"
 
 
 class AnalysisResponse(BaseModel):

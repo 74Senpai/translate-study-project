@@ -16,6 +16,17 @@ from src.translate.manager.input_manager import InputManager, InputConfig
 _input = InputManager()
 
 
+def _is_enabled(options: Optional[dict], key: str, default: bool = False) -> bool:
+    if not options or key not in options:
+        return default
+    val = options[key]
+    if isinstance(val, bool):
+        return val
+    if isinstance(val, str):
+        return val.lower() in ("true", "1", "yes")
+    return bool(val)
+
+
 class TranslateWorkflow:
     """
     Workflow runner for EN -> VI (and VI -> EN) translation.
@@ -97,22 +108,25 @@ class TranslateWorkflow:
 
     async def _process_vi_en_flow(self, req: TranslateRequest, sentences):
         options = req.option or {}
-        enable_analysis = options.get("analysis", True)
-        enable_vocab = options.get("vocab", True)
-        enable_stats = options.get("stats", True)
+        enable_translate = _is_enabled(options, "translate", default=True)
+        enable_analysis = _is_enabled(options, "analysis", default=False)
+        enable_vocab = _is_enabled(options, "vocab", default=False)
+        enable_stats = _is_enabled(options, "stats", default=False)
 
         curr_engine = self.translator.engine_manager.get_current_engine()
         engine_name = curr_engine.name_engine if curr_engine else "default"
 
-        chunks = _input.get_inputs(text=req.text, service=self.translator.__class__.__name__)
-        translated_pieces = []
-        async for resp in self.translator.translate(source=req.source, chunks=chunks):
-            translated_pieces.append(resp.translated_text)
-            await self._queue.put(TranslateWorkflowResponse(type_response=TypeResponse.TRANSLATE, data=resp))
+        translated_text = req.text
+        if enable_translate:
+            chunks = _input.get_inputs(text=req.text, service=self.translator.__class__.__name__)
+            translated_pieces = []
+            async for resp in self.translator.translate(source=req.source, chunks=chunks):
+                translated_pieces.append(resp.translated_text)
+                await self._queue.put(TranslateWorkflowResponse(type_response=TypeResponse.TRANSLATE, data=resp))
 
-        translated_text = " ".join(translated_pieces).strip()
-        if not translated_text:
-            translated_text = req.text
+            translated_text = " ".join(translated_pieces).strip()
+            if not translated_text:
+                translated_text = req.text
 
         english_sentences = _input.split_text_to_sentences(translated_text)
 
@@ -156,10 +170,11 @@ class TranslateWorkflow:
         finished = 0
 
         options = req.option or {}
-        enable_analysis = options.get("analysis", True)
-        enable_vocab = options.get("vocab", True)
-        enable_typo = options.get("typo", True)
-        enable_stats = options.get("stats", True)
+        enable_translate = _is_enabled(options, "translate", default=True)
+        enable_analysis = _is_enabled(options, "analysis", default=False)
+        enable_vocab = _is_enabled(options, "vocab", default=False)
+        enable_typo = _is_enabled(options, "typo", default=False)
+        enable_stats = _is_enabled(options, "stats", default=False)
 
         source_lang = req.source.source_lang
         target_lang = req.source.target_lang
@@ -190,11 +205,12 @@ class TranslateWorkflow:
                 )
 
             # Task 4b: Language Translation
-            chunks = _input.get_inputs(text=req.text, service=self.translator.__class__.__name__)
-            self._add_event(
-                self.translator.translate(source=req.source, chunks=chunks),
-                type_resp=TypeResponse.TRANSLATE
-            )
+            if enable_translate:
+                chunks = _input.get_inputs(text=req.text, service=self.translator.__class__.__name__)
+                self._add_event(
+                    self.translator.translate(source=req.source, chunks=chunks),
+                    type_resp=TypeResponse.TRANSLATE
+                )
 
             # Task 4c: Sentence Structure, POS, Form & Tense Analysis
             if enable_analysis:
@@ -221,11 +237,12 @@ class TranslateWorkflow:
 
         else:
             # Standard fallback flow for other language directions
-            chunks = _input.get_inputs(text=req.text, service=self.translator.__class__.__name__)
-            self._add_event(
-                self.translator.translate(source=req.source, chunks=chunks),
-                type_resp=TypeResponse.TRANSLATE
-            )
+            if enable_translate:
+                chunks = _input.get_inputs(text=req.text, service=self.translator.__class__.__name__)
+                self._add_event(
+                    self.translator.translate(source=req.source, chunks=chunks),
+                    type_resp=TypeResponse.TRANSLATE
+                )
             if enable_analysis and self.analysis.is_availabel():
                 self._add_event(
                     self.analysis.analysis(lang=source_lang, sentences=sentences),
