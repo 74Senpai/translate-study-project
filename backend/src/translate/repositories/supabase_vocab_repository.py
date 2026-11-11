@@ -329,6 +329,7 @@ class SupabaseVocabRepository:
     def record_user_sense_progress(self, user_id: str, sense_id: str) -> Optional[Dict[str, Any]]:
         """Ghi nhận số lần dịch / cập nhật tiến độ học sense của user."""
         clean_sense_id = _clean_sense_id(sense_id)
+        now_iso = datetime.now(timezone.utc).isoformat()
         try:
             existing = (
                 self.client.table("user_sense_progress")
@@ -340,24 +341,33 @@ class SupabaseVocabRepository:
             )
             if existing and existing.data:
                 curr_count = existing.data.get("translated_count", 0)
+                updates = {
+                    "translated_count": curr_count + 1,
+                    "last_translated": now_iso,
+                    "updated_at": now_iso,
+                }
+                if existing.data.get("current_repetition_id") is None:
+                    updates["current_repetition_id"] = 1
+                if existing.data.get("next_review") is None:
+                    updates["next_review"] = now_iso
+
                 res_up = (
                     self.client.table("user_sense_progress")
-                    .update({
-                        "translated_count": curr_count + 1,
-                        "last_translated": "now()",
-                        "updated_at": "now()",
-                    })
+                    .update(updates)
                     .eq("id", existing.data["id"])
                     .execute()
                 )
                 return res_up.data[0] if res_up.data else existing.data
 
+            # Từ mới phát hiện: gán luôn Box 1 repetition id và ngày review tiếp theo là ngày phát hiện
             payload = {
                 "user_id": user_id,
                 "sense_id": clean_sense_id,
                 "mastery_score": 0.0,
+                "current_repetition_id": 1,
+                "next_review": now_iso,
                 "translated_count": 1,
-                "last_translated": "now()",
+                "last_translated": now_iso,
                 "wrong_count": 0,
             }
             res = self.client.table("user_sense_progress").insert(payload).execute()

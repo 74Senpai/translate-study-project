@@ -244,6 +244,13 @@ async def get_user_words(
     else:
         query = query.order("last_seen", desc=True)
 
+    # Count total matching rows (before applying range)
+    count_query = client.table("user_word_statistics").select("id", count="exact").eq("user_id", user_id)
+    if search and search.strip():
+        count_query = count_query.ilike("word", f"%{search.strip().lower()}%")
+    count_res = count_query.execute()
+    total_count = count_res.count if count_res and count_res.count is not None else 0
+
     res = query.range(offset, offset + limit - 1).execute()
     items = res.data or []
 
@@ -303,7 +310,7 @@ async def get_user_words(
 
     return {
         "items": enriched_items,
-        "total": len(enriched_items),
+        "total": total_count,
         "limit": limit,
         "offset": offset
     }

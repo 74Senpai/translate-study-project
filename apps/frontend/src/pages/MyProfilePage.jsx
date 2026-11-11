@@ -44,6 +44,9 @@ export default function MyProfilePage() {
   const [wordsLoading, setWordsLoading] = useState(false);
   const [wordsSearch, setWordsSearch] = useState("");
   const [wordsSort, setWordsSort] = useState("last_seen");
+  const [wordsPage, setWordsPage] = useState(1);
+  const [wordsTotal, setWordsTotal] = useState(0);
+  const WORDS_PAGE_SIZE = 25;
   const [wordModalOpen, setWordModalOpen] = useState(false);
   const [editingWord, setEditingWord] = useState(null); // null = add new, object = edit
   const [savingWord, setSavingWord] = useState(false);
@@ -88,18 +91,20 @@ export default function MyProfilePage() {
     }
   };
 
-  const fetchWords = async () => {
+  const fetchWords = async (page = wordsPage) => {
     setWordsLoading(true);
     try {
       const params = new URLSearchParams();
       if (wordsSearch) params.append("search", wordsSearch);
       if (wordsSort) params.append("sort_by", wordsSort);
-      params.append("limit", "100");
+      params.append("limit", String(WORDS_PAGE_SIZE));
+      params.append("offset", String((page - 1) * WORDS_PAGE_SIZE));
 
       const { data } = await axiosInstance.get(
         `/user/words?${params.toString()}`,
       );
       setWords(data.items || []);
+      setWordsTotal(data.total || 0);
     } catch (err) {
       console.error("Error fetching words:", err);
       showToast("Không thể tải danh sách từ cá nhân.", "error");
@@ -143,6 +148,7 @@ export default function MyProfilePage() {
             "Bộ thẻ tạo câu hỏi động từ kho từ vựng và lịch sử dịch của bạn, tự động ưu tiên ôn tập theo Leitner Box.",
           is_public: false,
           total_cards: 20,
+          daily_limit: 0,
         });
         targetSetId = data.id;
         setDynamicSetId(targetSetId);
@@ -162,16 +168,22 @@ export default function MyProfilePage() {
 
   useEffect(() => {
     if (isAuthenticated) {
-      fetchProfile();
-      fetchWords();
-      fetchLeitnerStats();
-      fetchDynamicSet();
+      Promise.all([fetchProfile(), fetchLeitnerStats(), fetchDynamicSet()]);
+      fetchWords(1);
     }
-  }, [isAuthenticated, wordsSort]);
+  }, [isAuthenticated]);
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      setWordsPage(1);
+      fetchWords(1);
+    }
+  }, [wordsSort]);
 
   const handleSearchSubmit = (e) => {
     e.preventDefault();
-    fetchWords();
+    setWordsPage(1);
+    fetchWords(1);
   };
 
   // Avatar upload
@@ -831,6 +843,38 @@ export default function MyProfilePage() {
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+
+          {/* Pagination */}
+          {!wordsLoading && wordsTotal > WORDS_PAGE_SIZE && (
+            <div className="flex items-center justify-center gap-4 mt-8">
+              <button
+                disabled={wordsPage === 1}
+                onClick={() => {
+                  const p = wordsPage - 1;
+                  setWordsPage(p);
+                  fetchWords(p);
+                }}
+                className="px-4 py-2 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-bold disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+              >
+                ← Trước
+              </button>
+              <span className="text-sm font-bold text-slate-500">
+                Trang {wordsPage} / {Math.ceil(wordsTotal / WORDS_PAGE_SIZE)}{" "}
+                · <span className="text-indigo-600">{wordsTotal}</span> từ
+              </span>
+              <button
+                disabled={wordsPage >= Math.ceil(wordsTotal / WORDS_PAGE_SIZE)}
+                onClick={() => {
+                  const p = wordsPage + 1;
+                  setWordsPage(p);
+                  fetchWords(p);
+                }}
+                className="px-4 py-2 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-bold disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+              >
+                Sau →
+              </button>
             </div>
           )}
         </div>

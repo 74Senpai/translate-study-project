@@ -84,6 +84,13 @@ class VocabService:
             except Exception as e:
                 logger.warning(f"NLTK download {pkg}: {e}")
 
+        self._spell = None
+        try:
+            from spellchecker import SpellChecker
+            self._spell = SpellChecker()
+        except Exception as e:
+            logger.warning(f"Could not load SpellChecker in VocabService: {e}")
+
     @staticmethod
     def _extract_synonyms_from_synset(
         synset,
@@ -525,11 +532,21 @@ class VocabService:
             sentence_text=sentence_text,
             translated_sentence=translated_sentence,
         )
+        saved_items = []
         for item in vocab_items:
+            # Chỉ lưu các từ vựng đã đi qua typo (bỏ qua từ sai chính tả)
+            clean_w = item.word.strip().lower()
+            if self._spell and not item.is_phrase and not item.is_proper_noun:
+                # Nếu từ là từ đơn và bị spellchecker đánh dấu là unknown (lỗi typo) thì không lưu vào kho từ
+                if clean_w in self._spell.unknown([clean_w]):
+                    logger.info(f"Bỏ qua từ có lỗi chính tả, không lưu vào kho từ cá nhân: '{item.word}'")
+                    continue
+
             if not item.ipa:
                 item.ipa = self.ipa_service.get_ipa(item.word)
             self.repo.save_vocab_item(item, user_id=user_id)
-        return VocabAnalysisResponse(sentence=sentence_text, vocabularies=vocab_items)
+            saved_items.append(item)
+        return VocabAnalysisResponse(sentence=sentence_text, vocabularies=saved_items)
 
     # ── Context Window & 5-Method Helpers ─────────────────────────────────────
 

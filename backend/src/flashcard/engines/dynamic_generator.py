@@ -632,30 +632,59 @@ class DynamicGenerator:
     ) -> List["FlashcardCard"]:
         """
         Tạo danh sách cards động chỉ từ các từ trong một hoặc nhiều Leitner Box cụ thể của user.
-        Box number là current_repetition_id trong user_sense_progress.
+        box_number là loop_order (số thứ tự box 1-5), cần chuyển sang loop id thực tế trong DB.
         """
         total_cards = settings.total_cards or 20
         allowed_types = settings.allowed_task_types or ["choice", "fill", "complete"]
 
-        # Get all sense_ids for words in the requested box
+        # Resolve mapping loop_id <-> loop_order
+        loop_id_to_order: Dict[Any, int] = {}
+        if supabase_client:
+            try:
+                loops_res = supabase_client.table("repetition_loops").select("id, loop_order").order("loop_order").execute()
+                if loops_res and loops_res.data:
+                    loop_id_to_order = {l["id"]: l["loop_order"] for l in loops_res.data if l.get("loop_order") and l.get("id")}
+            except Exception as e:
+                logger.warning(f"Could not load repetition_loops for box mapping: {e}")
+
+        target_boxes = [box_number] if isinstance(box_number, int) else list(box_number)
+
+        # Get all sense_ids for words in the requested box that are due for review (next_review <= now)
         words_in_box = []
         if supabase_client:
             try:
-                base_query = supabase_client.table("user_sense_progress").select(
+                now = datetime.now(timezone.utc)
+                prog_res = supabase_client.table("user_sense_progress").select(
                     "sense_id, mastery_score, current_repetition_id, next_review, wrong_count"
-                ).eq("user_id", user_id)
+                ).eq("user_id", user_id).execute()
 
-                if isinstance(box_number, list):
-                    if hasattr(base_query, "in_"):
-                        prog_res = base_query.in_("current_repetition_id", box_number).limit(200).execute()
-                    else:
-                        prog_res = base_query.execute()
-                else:
-                    prog_res = base_query.eq("current_repetition_id", box_number).limit(200).execute()
+                eligible_progress = []
+                for p in (prog_res.data or []):
+                    raw_rep = p.get("current_repetition_id") or 1
+                    box_num = loop_id_to_order.get(raw_rep, raw_rep)
+                    if box_num not in target_boxes:
+                        continue
 
-                if prog_res and prog_res.data:
-                    sense_ids = [p["sense_id"] for p in prog_res.data]
-                    progress_map = {p["sense_id"]: p for p in prog_res.data}
+                    # Kiểm tra next_review: nếu ngày next review là ngày hiện tại hoặc ngày nhỏ hơn hiện tại thì có thể review
+                    next_review_str = p.get("next_review")
+                    is_due = True
+                    if next_review_str:
+                        try:
+                            clean_dt_str = str(next_review_str).replace("Z", "+00:00")
+                            nr_dt = datetime.fromisoformat(clean_dt_str)
+                            if nr_dt.tzinfo is None:
+                                nr_dt = nr_dt.replace(tzinfo=timezone.utc)
+                            if (nr_dt - now).total_seconds() > 0:
+                                is_due = False
+                        except Exception:
+                            is_due = True
+
+                    if is_due:
+                        eligible_progress.append(p)
+
+                if eligible_progress:
+                    sense_ids = [p["sense_id"] for p in eligible_progress]
+                    progress_map = {p["sense_id"]: p for p in eligible_progress}
 
                     # Fetch senses for these sense_ids
                     s_query = supabase_client.table("senses").select(
@@ -703,7 +732,7 @@ class DynamicGenerator:
                                 "sense": sense,
                                 "sense_id": sense_id,
                                 "proficiency": prog.get("mastery_score", 0.0),
-                                "leitner_box": prog.get("current_repetition_id", 1),
+                                "leitner_box": loop_id_to_order.get(prog.get("current_repetition_id") or 1, 1),
                                 "next_review": prog.get("next_review"),
                                 "encountered_count": stat.get("encountered_count", 0),
                                 "translated_count": stat.get("translated_count", 0),

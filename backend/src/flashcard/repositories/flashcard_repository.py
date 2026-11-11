@@ -621,28 +621,32 @@ class FlashcardRepository:
 
     # ── PROFICIENCY & LEITNER SRS ────────────────────────────────────────────
 
-    async def get_user_word_proficiency(self, user_id: str, word: str) -> Dict[str, Any]:
+    async def get_user_word_proficiency(self, user_id: str, word: str, sense_id: Optional[str] = None) -> Dict[str, Any]:
         """Lấy điểm thông thạo và tiến trình Leitner của từ đối với user từ Supabase."""
         clean_word = word.strip().lower()
 
         if self.supabase:
             try:
-                w_rec = self.supabase.table("words").select("id").eq("word_text", clean_word).maybe_single().execute()
-                if w_rec and w_rec.data:
-                    w_id = w_rec.data["id"]
-                    s_rec = self.supabase.table("senses").select("id").eq("word_id", w_id).limit(1).execute()
-                    if s_rec and s_rec.data:
-                        sense_id = s_rec.data[0]["id"]
-                        p_rec = self.supabase.table("user_sense_progress").select(
-                            "mastery_score, current_repetition_id, wrong_count, translated_count"
-                        ).eq("user_id", user_id).eq("sense_id", sense_id).maybe_single().execute()
-                        if p_rec and p_rec.data:
-                            return {
-                                "proficiency": p_rec.data.get("mastery_score", 0.0),
-                                "leitner_box": p_rec.data.get("current_repetition_id") or 1,
-                                "attempts": p_rec.data.get("translated_count", 0) + p_rec.data.get("wrong_count", 0),
-                                "correct_count": p_rec.data.get("translated_count", 0),
-                            }
+                target_sense_id = sense_id
+                if not target_sense_id:
+                    w_rec = self.supabase.table("words").select("id").eq("word_text", clean_word).maybe_single().execute()
+                    if w_rec and w_rec.data:
+                        w_id = w_rec.data["id"]
+                        s_rec = self.supabase.table("senses").select("id").eq("word_id", w_id).limit(1).execute()
+                        if s_rec and s_rec.data:
+                            target_sense_id = s_rec.data[0]["id"]
+
+                if target_sense_id:
+                    p_rec = self.supabase.table("user_sense_progress").select(
+                        "mastery_score, current_repetition_id, wrong_count, translated_count"
+                    ).eq("user_id", user_id).eq("sense_id", target_sense_id).maybe_single().execute()
+                    if p_rec and p_rec.data:
+                        return {
+                            "proficiency": p_rec.data.get("mastery_score", 0.0),
+                            "leitner_box": p_rec.data.get("current_repetition_id") or 1,
+                            "attempts": p_rec.data.get("translated_count", 0) + p_rec.data.get("wrong_count", 0),
+                            "correct_count": p_rec.data.get("translated_count", 0),
+                        }
             except Exception as e:
                 logger.debug(f"Supabase get_user_word_proficiency notice: {e}")
 
@@ -994,7 +998,8 @@ class FlashcardRepository:
         word: str,
         delta: float,
         is_correct: bool,
-        max_boxes: int = 5
+        max_boxes: int = 5,
+        sense_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Cập nhật độ thông thạo của từ và chuyển đổi Leitner box vào Supabase:
@@ -1005,7 +1010,7 @@ class FlashcardRepository:
         clean_word = word.strip().lower()
         now = datetime.now(timezone.utc)
         now_iso = now.isoformat()
-        current = await self.get_user_word_proficiency(user_id, clean_word)
+        current = await self.get_user_word_proficiency(user_id, clean_word, sense_id=sense_id)
 
         new_proficiency = round(current["proficiency"] + delta, 1)
         new_attempts = current["attempts"] + 1
@@ -1030,32 +1035,36 @@ class FlashcardRepository:
         # Cập nhật Supabase user_sense_progress (SRS chính)
         if self.supabase:
             try:
-                w_rec = self.supabase.table("words").select("id").eq("word_text", clean_word).maybe_single().execute()
-                if w_rec and w_rec.data:
-                    w_id = w_rec.data["id"]
-                    s_rec = self.supabase.table("senses").select("id").eq("word_id", w_id).limit(1).execute()
-                    if s_rec and s_rec.data:
-                        sense_id = s_rec.data[0]["id"]
-                        prog_rec = self.supabase.table("user_sense_progress").select(
-                            "id, wrong_count"
-                        ).eq("user_id", user_id).eq("sense_id", sense_id).maybe_single().execute()
+                actual_sense_id = sense_id
+                if not actual_sense_id:
+                    w_rec = self.supabase.table("words").select("id").eq("word_text", clean_word).maybe_single().execute()
+                    if w_rec and w_rec.data:
+                        w_id = w_rec.data["id"]
+                        s_rec = self.supabase.table("senses").select("id").eq("word_id", w_id).limit(1).execute()
+                        if s_rec and s_rec.data:
+                            actual_sense_id = s_rec.data[0]["id"]
 
-                        prog_payload = {
-                            "user_id": user_id,
-                            "sense_id": sense_id,
-                            "mastery_score": max(0.0, new_proficiency),
-                            "current_repetition_id": target_loop_id,
-                            "last_review": now_iso,
-                            "next_review": next_review_time,
-                            "updated_at": now_iso,
-                        }
-                        if not is_correct:
-                            w_count = (prog_rec.data.get("wrong_count", 0) + 1) if (prog_rec and prog_rec.data) else 1
-                            prog_payload["wrong_count"] = w_count
+                if actual_sense_id:
+                    prog_rec = self.supabase.table("user_sense_progress").select(
+                        "id, wrong_count"
+                    ).eq("user_id", user_id).eq("sense_id", actual_sense_id).maybe_single().execute()
 
-                        self.supabase.table("user_sense_progress").upsert(
-                            prog_payload, on_conflict="user_id,sense_id"
-                        ).execute()
+                    prog_payload = {
+                        "user_id": user_id,
+                        "sense_id": actual_sense_id,
+                        "mastery_score": max(0.0, new_proficiency),
+                        "current_repetition_id": target_loop_id,
+                        "last_review": now_iso,
+                        "next_review": next_review_time,
+                        "updated_at": now_iso,
+                    }
+                    if not is_correct:
+                        w_count = (prog_rec.data.get("wrong_count", 0) + 1) if (prog_rec and prog_rec.data) else 1
+                        prog_payload["wrong_count"] = w_count
+
+                    self.supabase.table("user_sense_progress").upsert(
+                        prog_payload, on_conflict="user_id,sense_id"
+                    ).execute()
             except Exception as e:
                 logger.debug(f"Supabase update_user_sense_progress notice: {e}")
 

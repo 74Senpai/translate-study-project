@@ -123,7 +123,8 @@ class FlashcardService:
             allowed_task_types=req.allowed_task_types or ["choice", "fill", "complete"],
             time_limit_mode=req.time_limit_mode,
             per_card_timer=req.per_card_timer,
-            daily_limit=req.daily_limit,
+            # user_dynamic là bộ thẻ cá nhân của user — không giới hạn lượt ngày
+            daily_limit=0 if mode == "user_dynamic" else req.daily_limit,
             reset_time=req.reset_time,
             event_start_at=req.event_start_at,
             event_end_at=req.event_end_at,
@@ -504,26 +505,23 @@ class FlashcardService:
         settings_dict = card_set.get("settings") or {}
         settings = FlashcardSettings(**settings_dict)
 
-        # 1. Kiểm tra giới hạn chơi trong ngày và khung giờ
-        usage = await self.repo.get_user_usage(
-            user_id=user_id,
-            set_id=set_id,
-            daily_limit=settings.daily_limit,
-            reset_time_str=settings.reset_time,
-            event_start_at=settings.event_start_at,
-            event_end_at=settings.event_end_at
-        )
-        if not usage["can_play"]:
-            if usage["event_status"] == "not_started":
-                raise HTTPException(status_code=400, detail="Bộ thẻ này chưa tới thời gian mở.")
-            elif usage["event_status"] == "ended":
-                raise HTTPException(status_code=400, detail="Bộ thẻ này đã kết thúc thời gian mở.")
-            else:
-                raise HTTPException(
-                    status_code=429,
-                    detail=f"Bạn đã đạt giới hạn {settings.daily_limit} lượt làm hôm nay. Lượt chơi sẽ làm mới lúc {settings.reset_time}."
-                )
-        await self.repo.increment_usage(user_id=user_id, set_id=set_id, reset_time_str=settings.reset_time)
+        # 1. Kiểm tra khung giờ sự kiện (nếu có) — bỏ qua giới hạn lượt ngày cho box session
+        # Box session là chế độ ôn tập có chủ đích, không nên bị giới hạn bởi daily_limit
+        set_type = card_set.get("set_type", "manual")
+        if settings.event_start_at or settings.event_end_at:
+            usage = await self.repo.get_user_usage(
+                user_id=user_id,
+                set_id=set_id,
+                daily_limit=0,  # bỏ qua daily_limit cho box session
+                reset_time_str=settings.reset_time,
+                event_start_at=settings.event_start_at,
+                event_end_at=settings.event_end_at
+            )
+            if not usage["can_play"]:
+                if usage["event_status"] == "not_started":
+                    raise HTTPException(status_code=400, detail="Bộ thẻ này chưa tới thời gian mở.")
+                elif usage["event_status"] == "ended":
+                    raise HTTPException(status_code=400, detail="Bộ thẻ này đã kết thúc thời gian mở.")
 
         # 2. Sinh thẻ bài lọc theo box_number
         cards = await DynamicGenerator.generate_user_dynamic_cards_for_box(
@@ -538,7 +536,7 @@ class FlashcardService:
         if not cards:
             raise HTTPException(
                 status_code=400,
-                detail=f"Box {box_label} hiện chưa có từ vựng nào để luyện tập. Hãy luyện tập bộ thẻ để tăng tiến độ các từ vào Box {box_label}."
+                detail=f"Box {box_label} hiện chưa có từ vựng nào đến hạn ôn tập (next_review <= ngày hiện tại). Hãy luyện tập thêm hoặc quay lại khi tới hạn ôn tập nhé."
             )
 
         # 3. Ghi nhận từ vựng background
@@ -652,7 +650,8 @@ class FlashcardService:
                 user_id=user_id,
                 word=req.word,
                 delta=points_earned,
-                is_correct=req.is_correct
+                is_correct=req.is_correct,
+                sense_id=req.sense_id
             )
             new_prof = res["proficiency"]
             leitner_box = res["leitner_box"]
@@ -705,79 +704,6 @@ class FlashcardService:
             leitner_box=leitner_box,
             bonus_toast=bonus_toast,
             word_stats=word_stats
-        )
-
-        await self.repo.record_english_words_exposure(
-            user_id=user_id,
-            text=f"{req.word} {user_answer_str}",
-            is_answer=True
-        )
-
-        # 2. Tính điểm cộng hoặc điểm trừ
-        points_earned = 0
-        new_prof = 0.0
-        leitner_box = 1
-        bonus_toast = None
-
-        if req.is_correct:
-            points_earned = ScoringEngine.calculate_correct_score(
-                time_spent=req.time_spent,
-                time_limit=req.time_limit
-            )
-            feedback = "Chính xác! Làm rất tốt."
-        else:
-            # Lấy thông tin gặp/dịch của từ
-            encountered_count = 0
-            translated_count = 0
-            if user_id:
-                prof_data = await self.repo.get_user_word_proficiency(user_id, req.word)
-                encountered_count = prof_data.get("attempts", 0)
-
-            penalty = ScoringEngine.calculate_incorrect_penalty(
-                encountered_count=encountered_count,
-                translated_count=translated_count,
-                word=req.word
-            )
-            points_earned = -int(round(penalty))
-            feedback = f"Chưa chính xác. Đáp án đúng là '{req.word}'."
-
-        # 3. Cập nhật tiến trình Leitner & điểm thông thạo của từ
-        if user_id:
-            res = await self.repo.update_user_word_proficiency(
-                user_id=user_id,
-                word=req.word,
-                delta=points_earned,
-                is_correct=req.is_correct
-            )
-            new_prof = res["proficiency"]
-            leitner_box = res["leitner_box"]
-
-            if new_prof >= 100:
-                bonus_toast = {
-                    "type": "mastered",
-                    "title": "Thành thạo từ vựng!",
-                    "message": f"Bạn đã hoàn toàn làm chủ từ '{req.word}'!",
-                }
-
-        # 4. Cập nhật phiên học trong Supabase
-        current_streak = 0
-        if req.session_id:
-            sess = await self.repo.get_session(req.session_id)
-            if sess:
-                current_streak = (sess.get("streak", 0) + 1) if req.is_correct else 0
-                await self.repo.update_session(req.session_id, {
-                    "score": sess.get("score", 0) + max(0, points_earned),
-                    "streak": current_streak
-                })
-
-        return SubmitAnswerResponse(
-            is_correct=req.is_correct,
-            points_earned=points_earned,
-            streak=current_streak,
-            new_proficiency=new_prof,
-            feedback=feedback,
-            leitner_box=leitner_box,
-            bonus_toast=bonus_toast
         )
 
     # ── COMPLETE SESSION ─────────────────────────────────────────────────────

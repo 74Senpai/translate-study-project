@@ -38,6 +38,7 @@ export default function FlashcardListPage() {
   const [inviteError, setInviteError] = useState("");
   const [leitnerStats, setLeitnerStats] = useState(null);
   const [selectedBoxMode, setSelectedBoxMode] = useState("default");
+  const [expandedQueue, setExpandedQueue] = useState(null);
   const navigate = useNavigate();
 
   const fetchSets = async () => {
